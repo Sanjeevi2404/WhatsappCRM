@@ -88,6 +88,7 @@ vi.mock("./meta-send", () => ({
 import {
   dispatchInboundToFlows,
   matchReplyId,
+  matchTextReply,
   matchesKeywordTrigger,
   isAutoAdvancing,
   isSuspending,
@@ -186,6 +187,55 @@ describe("matchReplyId", () => {
         "x",
       ),
     ).toBeNull();
+  });
+});
+
+describe("matchTextReply", () => {
+  const buttonNode = {
+    node_type: "send_buttons",
+    config: {
+      text: "Pick an option",
+      buttons: [
+        { reply_id: "home_use", title: "1. Home Use", next_node_key: "home_flow" },
+        { reply_id: "commercial_use", title: "2. Commercial Use", next_node_key: "comm_flow" },
+      ],
+    },
+  };
+
+  it("matches button by 1-indexed number typed by customer", () => {
+    expect(matchTextReply(buttonNode, "1")).toBe("home_flow");
+    expect(matchTextReply(buttonNode, "2")).toBe("comm_flow");
+    expect(matchTextReply(buttonNode, "3")).toBeNull();
+  });
+
+  it("matches button by reply_id or title substring", () => {
+    expect(matchTextReply(buttonNode, "home_use")).toBe("home_flow");
+    expect(matchTextReply(buttonNode, "home")).toBe("home_flow");
+    expect(matchTextReply(buttonNode, "commercial")).toBe("comm_flow");
+    expect(matchTextReply(buttonNode, "something else")).toBeNull();
+  });
+
+  it("matches list rows by index and title", () => {
+    const listNode = {
+      node_type: "send_list",
+      config: {
+        text: "Select source",
+        button_label: "Options",
+        sections: [
+          {
+            title: "Sources",
+            rows: [
+              { reply_id: "corp", title: "Corporation water", next_node_key: "corp_next" },
+              { reply_id: "bore", title: "Borewell water", next_node_key: "bore_next" },
+            ],
+          },
+        ],
+      },
+    };
+    expect(matchTextReply(listNode, "1")).toBe("corp_next");
+    expect(matchTextReply(listNode, "2")).toBe("bore_next");
+    expect(matchTextReply(listNode, "borewell")).toBe("bore_next");
+    expect(matchTextReply(listNode, "99")).toBeNull();
   });
 });
 

@@ -92,6 +92,68 @@ export function matchReplyId(
 }
 
 /**
+ * Given a node + customer's typed text, match against button / list options
+ * (by reply_id, 1-indexed number, or title). Allows customers to type "1" or "2"
+ * or the option name, in addition to tapping interactive buttons/lists.
+ */
+export function matchTextReply(
+  node: { node_type: string; config: Record<string, unknown> },
+  text: string,
+): string | null {
+  const clean = text.trim().toLowerCase();
+  if (!clean) return null;
+
+  if (node.node_type === "send_buttons") {
+    const cfg = node.config as unknown as SendButtonsNodeConfig;
+    const btns = cfg.buttons ?? [];
+    // 1. Exact or lowercase match with reply_id
+    const hitById = btns.find((b) => b.reply_id.toLowerCase() === clean);
+    if (hitById) return hitById.next_node_key;
+
+    // 2. Index match (e.g. customer types "1", "2", "3")
+    const num = parseInt(clean, 10);
+    if (!isNaN(num) && num >= 1 && num <= btns.length) {
+      return btns[num - 1].next_node_key;
+    }
+
+    // 3. Title match
+    const hitByTitle = btns.find((b) => {
+      const t = b.title.toLowerCase();
+      return t === clean || t.includes(clean) || clean.includes(t);
+    });
+    if (hitByTitle) return hitByTitle.next_node_key;
+  }
+
+  if (node.node_type === "send_list") {
+    const cfg = node.config as unknown as SendListNodeConfig;
+    const allRows: Array<{ reply_id: string; title: string; next_node_key: string }> = [];
+    for (const section of cfg.sections ?? []) {
+      for (const row of section.rows ?? []) {
+        allRows.push(row);
+      }
+    }
+    // 1. Reply ID match
+    const hitById = allRows.find((r) => r.reply_id.toLowerCase() === clean);
+    if (hitById) return hitById.next_node_key;
+
+    // 2. Index match ("1", "2", etc.)
+    const num = parseInt(clean, 10);
+    if (!isNaN(num) && num >= 1 && num <= allRows.length) {
+      return allRows[num - 1].next_node_key;
+    }
+
+    // 3. Title match
+    const hitByTitle = allRows.find((r) => {
+      const t = r.title.toLowerCase();
+      return t === clean || t.includes(clean) || clean.includes(t);
+    });
+    if (hitByTitle) return hitByTitle.next_node_key;
+  }
+
+  return null;
+}
+
+/**
  * Case-insensitive contains/exact match against a list of keywords.
  * Used by the trigger evaluator. Stable enough that the v3 builder
  * UI can preview matches by passing canned strings.
@@ -1105,6 +1167,12 @@ async function handleReplyForActiveRun(
       currentNode.node_type === "send_list")
   ) {
     matched = matchReplyId(currentNode, message.reply_id);
+  } else if (
+    message.kind === "text" &&
+    (currentNode.node_type === "send_buttons" ||
+      currentNode.node_type === "send_list")
+  ) {
+    matched = matchTextReply(currentNode, message.text);
   } else if (
     message.kind === "text" &&
     currentNode.node_type === "collect_input"
