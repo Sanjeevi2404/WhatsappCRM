@@ -56,13 +56,16 @@ export function PresenceHeartbeat() {
       const t = Date.now();
       if (t - lastBeatAt < 1_000) return;
       lastBeatAt = t;
-      const { error } = await supabase.rpc("touch_presence", {
-        p_status: currentStatus(),
-      });
-      if (error && !cancelled) {
-        // Non-fatal: presence is best-effort. Log once per failure so a
-        // misconfigured RPC is visible without spamming.
-        console.error("[PresenceHeartbeat] touch_presence failed:", error.message);
+      try {
+        const { error } = await supabase.rpc("touch_presence", {
+          p_status: currentStatus(),
+        });
+        if (error && !cancelled) {
+          // Non-fatal: presence is best-effort. Use warn so dev overlay doesn't block UI.
+          console.warn("[PresenceHeartbeat] touch_presence:", error.message);
+        }
+      } catch {
+        // Non-fatal network drop or aborted fetch
       }
     };
 
