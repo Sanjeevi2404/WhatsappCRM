@@ -105,6 +105,8 @@ export interface HandoffNodeConfig {
    * node fires. Leave unset to flip the status without assignment.
    */
   assign_to?: string;
+  /** Optional next node to advance to after handoff (e.g. end). */
+  next_node_key?: string;
 }
 
 /**
@@ -173,16 +175,43 @@ export interface SetTagNodeConfig {
   next_node_key: string;
 }
 
+export type FormFieldType =
+  | "text"
+  | "phone"
+  | "email"
+  | "date"
+  | "time"
+  | "select"
+  | "textarea";
+
+export interface FormFieldDefinition {
+  id: string;
+  label: string;
+  type: FormFieldType;
+  required: boolean;
+  options?: string[];
+  placeholder?: string;
+  is_custom?: boolean;
+}
+
+export interface AppointmentFormNodeConfig {
+  screen_title: string;
+  body_text: string;
+  button_label: string;
+  meta_flow_id?: string;
+  fields: FormFieldDefinition[];
+  create_lead?: boolean;
+  pipeline_stage_id?: string;
+  next_node_key: string;
+}
+
 // Terminal nodes carry no config — they just stop the run.
 export type EndNodeConfig = Record<string, never>;
 
 /**
- * Total union — every concrete node_type the v1 engine understands.
+ * Total union — every concrete node_type the engine understands.
  * Add new node types here and the engine's switch will flag missing
  * cases via TypeScript's exhaustiveness check.
- *
- * v1.5+ additions (collect_input, condition, set_tag, http_fetch) will
- * extend this union — out-of-scope for the v1 engine PR.
  */
 export type FlowNodeConfig =
   | { node_type: "start"; config: StartNodeConfig }
@@ -191,10 +220,12 @@ export type FlowNodeConfig =
   | { node_type: "send_list"; config: SendListNodeConfig }
   | { node_type: "send_media"; config: SendMediaNodeConfig }
   | { node_type: "collect_input"; config: CollectInputNodeConfig }
+  | { node_type: "appointment_form"; config: AppointmentFormNodeConfig }
   | { node_type: "condition"; config: ConditionNodeConfig }
   | { node_type: "set_tag"; config: SetTagNodeConfig }
   | { node_type: "handoff"; config: HandoffNodeConfig }
   | { node_type: "end"; config: EndNodeConfig };
+
 
 export type FlowNodeType = FlowNodeConfig["node_type"];
 
@@ -329,7 +360,14 @@ export type ParsedInbound =
       /** The visible title of the tapped option (for logging). */
       reply_title: string;
       meta_message_id: string;
+    }
+  | {
+      kind: "nfm_reply";
+      meta_message_id: string;
+      data: Record<string, unknown>;
+      raw_json: string;
     };
+
 
 export interface DispatchInboundInput {
   /** Account tenancy key. Drives the lookup of active flows and the

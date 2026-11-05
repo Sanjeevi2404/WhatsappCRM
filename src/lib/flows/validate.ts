@@ -657,6 +657,50 @@ function validateNode(
       break;
     }
 
+    case "appointment_form": {
+      const cfg = node.config as {
+        body_text?: string;
+        fields?: Array<{ label?: string; id?: string }>;
+        next_node_key?: string;
+      };
+      if (!cfg.body_text?.trim()) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "body_text",
+          message: "Appointment form requires message body text.",
+        });
+      }
+      if (!cfg.fields || cfg.fields.length === 0) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "fields",
+          message: "Appointment form requires at least one field.",
+        });
+      }
+      if (!cfg.next_node_key) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "next_node_key",
+          message: "Appointment form requires a next node to advance to after submission.",
+        });
+      } else if (!knownKeys.has(cfg.next_node_key)) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "next_node_key",
+          message: `Referenced next node "${cfg.next_node_key}" does not exist.`,
+        });
+      }
+      break;
+    }
+
     case "condition": {
       const cfg = node.config as {
         subject?: "var" | "tag" | "contact_field";
@@ -776,10 +820,22 @@ function validateNode(
       break;
     }
 
-    case "handoff":
+    case "handoff": {
+      const cfg = node.config as { next_node_key?: string };
+      if (cfg.next_node_key && !knownKeys.has(cfg.next_node_key)) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "next_node_key",
+          message: `Referenced next node "${cfg.next_node_key}" does not exist.`,
+        });
+      }
+      break;
+    }
+
     case "end":
-      // Terminal nodes have no outgoing edges; nothing to validate
-      // beyond their existence.
+      // Terminal node has no outgoing edges; nothing to validate beyond existence.
       break;
 
     default:
@@ -826,7 +882,9 @@ function outgoingEdges(node: NodeInput): string[] {
     case "send_message":
     case "send_media":
     case "collect_input":
-    case "set_tag": {
+    case "appointment_form":
+    case "set_tag":
+    case "handoff": {
       const cfg = node.config as { next_node_key?: string };
       return cfg.next_node_key ? [cfg.next_node_key] : [];
     }
@@ -860,7 +918,6 @@ function outgoingEdges(node: NodeInput): string[] {
       }
       return out;
     }
-    case "handoff":
     case "end":
     default:
       return [];

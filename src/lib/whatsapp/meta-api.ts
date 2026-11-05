@@ -1260,3 +1260,96 @@ export async function downloadMedia(
   const buffer = Buffer.from(await response.arrayBuffer())
   return { buffer, contentType }
 }
+
+export interface SendInteractiveFlowArgs {
+  phoneNumberId: string
+  accessToken: string
+  to: string
+  bodyText: string
+  buttonLabel?: string
+  headerText?: string
+  footerText?: string
+  flowId: string
+  flowToken?: string
+  flowCta?: string
+  screen?: string
+  data?: Record<string, unknown>
+  contextMessageId?: string
+}
+
+/**
+ * Send a Meta WhatsApp Flows interactive message (type: 'flow').
+ * When tapped by the customer in WhatsApp, it opens a native
+ * multi-screen form directly within the chat.
+ */
+export async function sendInteractiveFlow(
+  args: SendInteractiveFlowArgs
+): Promise<MetaSendResult> {
+  const {
+    phoneNumberId,
+    accessToken,
+    to,
+    bodyText,
+    buttonLabel,
+    headerText,
+    footerText,
+    flowId,
+    flowToken = `flow_${Date.now()}`,
+    flowCta,
+    screen,
+    data,
+    contextMessageId,
+  } = args
+
+  validateInteractiveBody(bodyText)
+  validateInteractiveHeaderFooter(headerText, footerText)
+
+  const interactive: Record<string, unknown> = {
+    type: 'flow',
+    body: { text: bodyText },
+    action: {
+      name: 'flow',
+      parameters: {
+        flow_message_version: '3',
+        flow_token: flowToken,
+        flow_id: flowId,
+        flow_cta: flowCta || buttonLabel || 'Book Appointment',
+        flow_action: 'navigate',
+        ...(screen
+          ? {
+              flow_action_payload: {
+                screen,
+                ...(data ? { data } : {}),
+              },
+            }
+          : {}),
+      },
+    },
+  }
+  if (headerText) interactive.header = { type: 'text', text: headerText }
+  if (footerText) interactive.footer = { text: footerText }
+
+  const body: Record<string, unknown> = {
+    messaging_product: 'whatsapp',
+    ...recipientFields(to),
+    type: 'interactive',
+    interactive,
+  }
+  if (contextMessageId) body.context = { message_id: contextMessageId }
+
+  const url = `${META_API_BASE}/${phoneNumberId}/messages`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(body),
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  const resData = await response.json()
+  return { messageId: resData.messages[0].id }
+}
+

@@ -4,8 +4,12 @@ import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
-import type { Contact, Deal, ContactNote, Tag } from "@/types";
+import type { Contact, Deal, ContactNote, Tag, Appointment, AppointmentStatus } from "@/types";
 import {
+  Calendar,
+  Clock,
+  MapPin,
+  CheckCircle2,
   Phone,
   Mail,
   Copy,
@@ -33,6 +37,7 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
   const { accountId } = useAuth();
   const [copied, setCopied] = useState(false);
   const [deals, setDeals] = useState<Deal[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [notes, setNotes] = useState<ContactNote[]>([]);
   const [tags, setTags] = useState<(Tag & { contact_tag_id: string })[]>([]);
   const [newNote, setNewNote] = useState("");
@@ -43,13 +48,18 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
 
     const supabase = createClient();
 
-    // Fetch deals, notes, and tags in parallel
-    const [dealsRes, notesRes, tagsRes] = await Promise.all([
+    // Fetch deals, appointments, notes, and tags in parallel
+    const [dealsRes, apptsRes, notesRes, tagsRes] = await Promise.all([
       supabase
         .from("deals")
         .select("*, stage:pipeline_stages(*)")
         .eq("contact_id", contact.id)
         .order("created_at", { ascending: false }),
+      supabase
+        .from("appointments")
+        .select("*")
+        .eq("contact_id", contact.id)
+        .order("appointment_date", { ascending: false }),
       supabase
         .from("contact_notes")
         .select("*")
@@ -62,6 +72,7 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
     ]);
 
     if (dealsRes.data) setDeals(dealsRes.data);
+    if (apptsRes.data) setAppointments(apptsRes.data);
     if (notesRes.data) setNotes(notesRes.data);
     if (tagsRes.data) {
       const mapped = tagsRes.data
@@ -209,6 +220,119 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
                     {tag.name}
                   </span>
                 ))
+              )}
+            </div>
+          </div>
+
+          {/* Divider */}
+          <div className="my-4 border-t border-border" />
+
+          {/* Booked Appointments */}
+          <div>
+            <div className="flex items-center justify-between px-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              <span className="flex items-center gap-2">
+                <Calendar className="h-3 w-3 text-primary" />
+                Appointments
+              </span>
+              {appointments.length > 0 && (
+                <span className="rounded-full bg-primary/10 px-1.5 py-0.2 text-[10px] font-semibold text-primary">
+                  {appointments.length}
+                </span>
+              )}
+            </div>
+            <div className="mt-2 space-y-2">
+              {appointments.length === 0 ? (
+                <p className="px-1 text-xs text-muted-foreground">No appointments booked</p>
+              ) : (
+                appointments.map((appt) => {
+                  const statusColors: Record<AppointmentStatus, { bg: string; text: string }> = {
+                    pending: { bg: "bg-amber-500/15", text: "text-amber-500" },
+                    confirmed: { bg: "bg-emerald-500/15", text: "text-emerald-500" },
+                    completed: { bg: "bg-sky-500/15", text: "text-sky-500" },
+                    cancelled: { bg: "bg-rose-500/15", text: "text-rose-500" },
+                    no_show: { bg: "bg-muted", text: "text-muted-foreground" },
+                  };
+                  const color = statusColors[appt.status] ?? statusColors.pending;
+
+                  const handleStatusChange = async (newStatus: AppointmentStatus) => {
+                    const supabase = createClient();
+                    const { error } = await supabase
+                      .from("appointments")
+                      .update({ status: newStatus, updated_at: new Date().toISOString() })
+                      .eq("id", appt.id);
+                    if (!error) {
+                      setAppointments((prev) =>
+                        prev.map((a) => (a.id === appt.id ? { ...a, status: newStatus } : a))
+                      );
+                    }
+                  };
+
+                  return (
+                    <div
+                      key={appt.id}
+                      className="rounded-lg border border-border/80 bg-muted/60 p-2.5 transition-colors"
+                    >
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="text-xs font-semibold text-foreground truncate">
+                          {appt.appointment_type}
+                        </span>
+                        <span
+                          className={cn(
+                            "rounded-full px-2 py-0.5 text-[9px] font-medium capitalize",
+                            color.bg,
+                            color.text
+                          )}
+                        >
+                          {appt.status}
+                        </span>
+                      </div>
+
+                      <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                        <Clock className="h-3 w-3 shrink-0 text-primary" />
+                        <span>
+                          {format(new Date(appt.appointment_date), "MMM d, yyyy")} at {appt.appointment_time}
+                        </span>
+                      </div>
+
+                      {appt.location && (
+                        <div className="mt-1 flex items-start gap-1.5 text-[10px] text-muted-foreground">
+                          <MapPin className="h-3 w-3 shrink-0 mt-0.5" />
+                          <span className="truncate">{appt.location}</span>
+                        </div>
+                      )}
+
+                      {appt.additional_requirements && (
+                        <p className="mt-1.5 rounded bg-background/50 px-2 py-1 text-[10px] italic text-muted-foreground">
+                          "{appt.additional_requirements}"
+                        </p>
+                      )}
+
+                      {/* Status Quick Actions */}
+                      <div className="mt-2 flex items-center justify-end gap-1 border-t border-border/40 pt-1.5">
+                        {appt.status === "pending" && (
+                          <button
+                            type="button"
+                            onClick={() => handleStatusChange("confirmed")}
+                            className="inline-flex items-center gap-1 rounded bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-medium text-emerald-600 hover:bg-emerald-500/20"
+                          >
+                            <CheckCircle2 className="h-2.5 w-2.5" />
+                            Confirm
+                          </button>
+                        )}
+                        {appt.status === "confirmed" && (
+                          <button
+                            type="button"
+                            onClick={() => handleStatusChange("completed")}
+                            className="inline-flex items-center gap-1 rounded bg-sky-500/10 px-1.5 py-0.5 text-[9px] font-medium text-sky-600 hover:bg-sky-500/20"
+                          >
+                            <CheckCircle2 className="h-2.5 w-2.5" />
+                            Complete
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
               )}
             </div>
           </div>

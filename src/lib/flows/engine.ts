@@ -34,6 +34,7 @@
 
 import { supabaseAdmin } from "./admin-client";
 import {
+  engineSendAppointmentForm,
   engineSendInteractiveButtons,
   engineSendInteractiveList,
   engineSendMedia,
@@ -44,6 +45,7 @@ import { addContactTagAndDispatch } from "@/lib/contacts/tag-events";
 import { removeContactTag } from "@/lib/contacts/tag-write";
 import { checkRunTimeout, markRunTimedOut, type RunTimeoutCheck } from "./timeout";
 import {
+  type AppointmentFormNodeConfig,
   type CollectInputNodeConfig,
   type ConditionNodeConfig,
   type DispatchInboundInput,
@@ -154,6 +156,67 @@ export function matchTextReply(
 }
 
 /**
+ * Given a node + reply_id or text, resolve the specific option object
+ * { next_node_key, title, reply_id } matched.
+ */
+export function resolveInteractiveOption(
+  node: { node_type: string; config: Record<string, unknown> },
+  input: string,
+  kind: "id" | "text" = "id",
+): { next_node_key: string; title: string; reply_id: string } | null {
+  if (node.node_type === "send_buttons") {
+    const cfg = node.config as unknown as SendButtonsNodeConfig;
+    const btns = cfg.buttons ?? [];
+    if (kind === "id") {
+      const hit = btns.find((b) => b.reply_id === input);
+      if (hit) return { next_node_key: hit.next_node_key, title: hit.title, reply_id: hit.reply_id };
+    }
+    const clean = input.trim().toLowerCase();
+    const hitById = btns.find((b) => b.reply_id.toLowerCase() === clean);
+    if (hitById) return { next_node_key: hitById.next_node_key, title: hitById.title, reply_id: hitById.reply_id };
+    const num = parseInt(clean, 10);
+    if (!isNaN(num) && num >= 1 && num <= btns.length) {
+      const hit = btns[num - 1];
+      return { next_node_key: hit.next_node_key, title: hit.title, reply_id: hit.reply_id };
+    }
+    const hitByTitle = btns.find((b) => {
+      const t = b.title.toLowerCase();
+      return t === clean || t.includes(clean) || clean.includes(t);
+    });
+    if (hitByTitle) return { next_node_key: hitByTitle.next_node_key, title: hitByTitle.title, reply_id: hitByTitle.reply_id };
+  }
+
+  if (node.node_type === "send_list") {
+    const cfg = node.config as unknown as SendListNodeConfig;
+    const allRows: Array<{ reply_id: string; title: string; next_node_key: string }> = [];
+    for (const section of cfg.sections ?? []) {
+      for (const row of section.rows ?? []) {
+        allRows.push(row);
+      }
+    }
+    if (kind === "id") {
+      const hit = allRows.find((r) => r.reply_id === input);
+      if (hit) return { next_node_key: hit.next_node_key, title: hit.title, reply_id: hit.reply_id };
+    }
+    const clean = input.trim().toLowerCase();
+    const hitById = allRows.find((r) => r.reply_id.toLowerCase() === clean);
+    if (hitById) return { next_node_key: hitById.next_node_key, title: hitById.title, reply_id: hitById.reply_id };
+    const num = parseInt(clean, 10);
+    if (!isNaN(num) && num >= 1 && num <= allRows.length) {
+      const hit = allRows[num - 1];
+      return { next_node_key: hit.next_node_key, title: hit.title, reply_id: hit.reply_id };
+    }
+    const hitByTitle = allRows.find((r) => {
+      const t = r.title.toLowerCase();
+      return t === clean || t.includes(clean) || clean.includes(t);
+    });
+    if (hitByTitle) return { next_node_key: hitByTitle.next_node_key, title: hitByTitle.title, reply_id: hitByTitle.reply_id };
+  }
+
+  return null;
+}
+
+/**
  * Case-insensitive contains/exact match against a list of keywords.
  * Used by the trigger evaluator. Stable enough that the v3 builder
  * UI can preview matches by passing canned strings.
@@ -192,6 +255,7 @@ export function matchesKeywordTrigger(
  */
 export function entryTriggerTexts(message: ParsedInbound): string[] {
   if (message.kind === "text") return [message.text];
+  if (message.kind === "nfm_reply") return [];
   return [...new Set([message.reply_title, message.reply_id])].filter(
     (v): v is string => Boolean(v && v.trim()),
   );
@@ -236,7 +300,8 @@ export function isSuspending(node_type: string): boolean {
   return (
     node_type === "send_buttons" ||
     node_type === "send_list" ||
-    node_type === "collect_input"
+    node_type === "collect_input" ||
+    node_type === "appointment_form"
   );
 }
 
@@ -547,6 +612,47 @@ async function sendListAndSuspend(
   });
   await logEvent(db, run.id, "message_sent", node.node_key, {
     node_type: "send_list",
+    whatsapp_message_id,
+  });
+  const { data: msg } = await db
+    .from("messages")
+    .select("id")
+    .eq("message_id", whatsapp_message_id)
+    .maybeSingle();
+  await db
+    .from("flow_runs")
+    .update({
+      last_prompt_message_id: (msg as { id: string } | null)?.id ?? null,
+    })
+    .eq("id", run.id);
+  return { outcome: "advanced", node_key: node.node_key };
+}
+
+async function sendAppointmentFormAndSuspend(
+  db: AdminClient,
+  run: FlowRunRow,
+  node: FlowNodeRow,
+): Promise<{ outcome: "advanced"; node_key: string }> {
+  const cfg = node.config as unknown as AppointmentFormNodeConfig;
+  const { whatsapp_message_id } = await engineSendAppointmentForm({
+    accountId: run.account_id,
+    userId: run.user_id,
+    conversationId: run.conversation_id!,
+    contactId: run.contact_id!,
+    screenTitle: cfg.screen_title
+      ? interpolateVars(cfg.screen_title, run.vars)
+      : undefined,
+    bodyText: interpolateVars(
+      cfg.body_text || "Please book your appointment below.",
+      run.vars,
+    ),
+    buttonLabel: cfg.button_label
+      ? interpolateVars(cfg.button_label, run.vars)
+      : "Book Appointment",
+    metaFlowId: cfg.meta_flow_id,
+  });
+  await logEvent(db, run.id, "message_sent", node.node_key, {
+    node_type: "appointment_form",
     whatsapp_message_id,
   });
   const { data: msg } = await db
@@ -943,8 +1049,37 @@ async function advanceFromNodeKey(
       }
       return { outcome: "advanced" };
     }
+    if (node.node_type === "appointment_form") {
+      try {
+        await sendAppointmentFormAndSuspend(db, run, node);
+      } catch (err) {
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "appointment_form_failed",
+          detail: err instanceof Error ? err.message : String(err),
+        });
+        await endRun(db, run.id, "failed", "appointment_form_failed");
+        return { outcome: "completed" };
+      }
+      const advanced = await advanceCurrentNodeKey(
+        db,
+        run.id,
+        run.current_node_key,
+        node.node_key,
+      );
+      if (!advanced) {
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "lost_race_during_advance",
+        });
+      }
+      return { outcome: "advanced" };
+    }
     if (node.node_type === "handoff") {
       await executeHandoff(db, run, node);
+      const cfg = node.config as unknown as { next_node_key?: string };
+      if (cfg?.next_node_key && nodes.has(cfg.next_node_key)) {
+        currentKey = cfg.next_node_key;
+        continue;
+      }
       return { outcome: "handed_off" };
     }
     if (node.node_type === "end") {
@@ -1161,18 +1296,21 @@ async function handleReplyForActiveRun(
   //
   // Everything else falls through to the fallback policy below.
   let matched: string | null = null;
+  let selectedOption: { next_node_key: string; title: string; reply_id: string } | null = null;
   if (
     message.kind === "interactive_reply" &&
     (currentNode.node_type === "send_buttons" ||
       currentNode.node_type === "send_list")
   ) {
-    matched = matchReplyId(currentNode, message.reply_id);
+    selectedOption = resolveInteractiveOption(currentNode, message.reply_id, "id");
+    matched = selectedOption?.next_node_key ?? matchReplyId(currentNode, message.reply_id);
   } else if (
     message.kind === "text" &&
     (currentNode.node_type === "send_buttons" ||
       currentNode.node_type === "send_list")
   ) {
-    matched = matchTextReply(currentNode, message.text);
+    selectedOption = resolveInteractiveOption(currentNode, message.text, "text");
+    matched = selectedOption?.next_node_key ?? matchTextReply(currentNode, message.text);
   } else if (
     message.kind === "text" &&
     currentNode.node_type === "collect_input"
@@ -1192,12 +1330,284 @@ async function handleReplyForActiveRun(
       const outcome = await advanceFromNodeKey(db, run, cfg.next_node_key, nodes);
       return { consumed: true, flow_run_id: run.id, outcome: outcome.outcome };
     }
+  } else if (
+    currentNode.node_type === "appointment_form" &&
+    (message.kind === "nfm_reply" ||
+      (message.kind === "interactive_reply" && message.reply_id === "book_now") ||
+      message.kind === "text")
+  ) {
+    const cfg = currentNode.config as unknown as AppointmentFormNodeConfig;
+    const rawData =
+      message.kind === "nfm_reply"
+        ? (message.data as Record<string, unknown>)
+        : message.kind === "text"
+          ? {
+              additional_requirements: message.text,
+              specific_requirement: message.text,
+              notes: message.text,
+              customer_details: message.text,
+            }
+          : {};
+
+    const { data: contact } = await db
+      .from("contacts")
+      .select("id, name, phone, email")
+      .eq("id", run.contact_id!)
+      .maybeSingle();
+
+    const custName = String(
+      rawData.customer_name ||
+        rawData.name ||
+        rawData.Name ||
+        rawData["Customer Name"] ||
+        contact?.name ||
+        "Customer",
+    );
+    const phone = String(
+      rawData.phone ||
+        rawData.contact_number ||
+        rawData["Contact Number"] ||
+        contact?.phone ||
+        "",
+    );
+    const email = rawData.email ? String(rawData.email) : (contact?.email || null);
+    const apptDate = String(
+      rawData.appointment_date ||
+        rawData.date ||
+        new Date().toISOString().split("T")[0],
+    );
+    const apptTime = String(rawData.appointment_time || rawData.time || "10:00 AM");
+    const location =
+      rawData.location ||
+      rawData.area ||
+      rawData.area_location ||
+      rawData["Area / Location"] ||
+      rawData["Area/Location"] ||
+      rawData.address
+        ? String(
+            rawData.location ||
+              rawData.area ||
+              rawData.area_location ||
+              rawData["Area / Location"] ||
+              rawData["Area/Location"] ||
+              rawData.address,
+          )
+        : null;
+    const requirements =
+      rawData.additional_requirements ||
+      rawData.specific_requirement ||
+      rawData["Specific Requirement"] ||
+      rawData.notes ||
+      rawData.requirements
+        ? String(
+            rawData.additional_requirements ||
+              rawData.specific_requirement ||
+              rawData["Specific Requirement"] ||
+              rawData.notes ||
+              rawData.requirements,
+          )
+        : null;
+
+    const customerType = String(
+      run.vars.customer_type ||
+        (run.vars.water_source ? "Home" : run.vars.business_type ? "Commercial" : "Home"),
+    );
+    const waterSource = run.vars.water_source ? String(run.vars.water_source) : null;
+    const businessType = run.vars.business_type ? String(run.vars.business_type) : null;
+    const reqCategory = run.vars.requirement_category
+      ? String(run.vars.requirement_category)
+      : null;
+    const apptType = reqCategory || String(rawData.appointment_type || rawData.service || "RO Enquiry");
+
+    let dealId: string | null = null;
+    if (cfg.create_lead !== false) {
+      try {
+        let stageId = cfg.pipeline_stage_id;
+        let pipelineId: string | undefined;
+        if (!stageId) {
+          const { data: stage } = await db
+            .from("pipeline_stages")
+            .select("id, pipeline_id")
+            .limit(1)
+            .maybeSingle();
+          stageId = stage?.id;
+          pipelineId = stage?.pipeline_id;
+        } else {
+          const { data: stage } = await db
+            .from("pipeline_stages")
+            .select("pipeline_id")
+            .eq("id", stageId)
+            .maybeSingle();
+          pipelineId = stage?.pipeline_id;
+        }
+        if (stageId && pipelineId) {
+          const { data: deal } = await db
+            .from("deals")
+            .insert({
+              account_id: run.account_id,
+              user_id: run.user_id,
+              contact_id: run.contact_id,
+              conversation_id: run.conversation_id,
+              pipeline_id: pipelineId,
+              stage_id: stageId,
+              title: `${custName} - ${customerType} ${reqCategory || "RO Enquiry"}`,
+              value: 0,
+              status: "open",
+            })
+            .select("id")
+            .maybeSingle();
+          dealId = deal?.id ?? null;
+        }
+      } catch (dealErr) {
+        console.error("Failed to create appointment deal:", dealErr);
+      }
+    }
+
+    const { data: apptRecord } = await db
+      .from("appointments")
+      .insert({
+        account_id: run.account_id,
+        contact_id: run.contact_id,
+        conversation_id: run.conversation_id,
+        deal_id: dealId,
+        customer_name: custName,
+        phone,
+        email,
+        appointment_date: apptDate,
+        appointment_time: apptTime,
+        appointment_type: apptType,
+        location,
+        additional_requirements: requirements,
+        status: "pending",
+        form_data: {
+          customer_name: custName,
+          area: location,
+          location,
+          phone,
+          customer_type: customerType,
+          water_source: waterSource,
+          business_type: businessType,
+          requirement_category: reqCategory,
+          specific_requirement: requirements,
+          lead_status: "New",
+          ...rawData,
+        },
+      })
+      .select("id")
+      .maybeSingle();
+
+    if (custName && custName !== "Customer" && run.contact_id) {
+      await db
+        .from("contacts")
+        .update({
+          name: custName,
+          ...(email ? { email } : {}),
+        })
+        .eq("id", run.contact_id);
+    }
+
+    if (cfg.next_node_key) {
+      const customerDetailsSummary = [
+        custName && custName !== "Customer" ? `👤 Customer Name: ${custName}` : null,
+        location ? `📍 Area: ${location}` : null,
+        phone ? `📞 Phone: ${phone}` : null,
+        customerType ? `🏠 Customer Type: ${customerType}` : null,
+        waterSource ? `💧 Water Source: ${waterSource}` : null,
+        businessType ? `🏢 Business Type: ${businessType}` : null,
+        reqCategory ? `📋 Requirement Category: ${reqCategory}` : null,
+        requirements ? `📝 Specific Requirement: ${requirements}` : null,
+        `📌 Lead Status: New`,
+      ]
+        .filter(Boolean)
+        .join("\n");
+
+      const newVars = {
+        ...run.vars,
+        appointment_id: apptRecord?.id ?? "",
+        customer_name: custName,
+        name: custName,
+        area: location ?? "",
+        location: location ?? "",
+        phone,
+        contact_number: phone,
+        customer_type: customerType,
+        water_source: waterSource ?? "",
+        business_type: businessType ?? "",
+        requirement_category: reqCategory ?? "",
+        specific_requirement: requirements ?? "",
+        additional_requirements: requirements ?? "",
+        lead_status: "New",
+        email: email ?? "",
+        appointment_date: apptDate,
+        appointment_time: apptTime,
+        appointment_type: apptType,
+        customer_details:
+          customerDetailsSummary || (typeof rawData === "string" ? rawData : ""),
+        ...rawData,
+      };
+      if (
+        !(await claimReplyTransition(db, run, cfg.next_node_key, {
+          vars: newVars,
+        }))
+      ) {
+        return lostReplyRace(db, run, currentNode.node_key);
+      }
+      run.vars = newVars;
+      await logEvent(db, run.id, "reply_received", currentNode.node_key, {
+        event_kind: "appointment_booked",
+        appointment_id: apptRecord?.id,
+        customer_name: custName,
+        appointment_date: apptDate,
+        appointment_time: apptTime,
+      });
+      const outcome = await advanceFromNodeKey(db, run, cfg.next_node_key, nodes);
+      return { consumed: true, flow_run_id: run.id, outcome: outcome.outcome };
+    }
   }
 
   if (matched) {
-    if (!(await claimReplyTransition(db, run, matched))) {
+    const varPatches: Record<string, unknown> = {};
+    if (selectedOption) {
+      const optTitle = selectedOption.title;
+      const lowerId = selectedOption.reply_id.toLowerCase();
+      const lowerTitle = optTitle.toLowerCase();
+      const cleanTitle = optTitle.replace(/^\d+[\.\)]\s*/, "").trim();
+
+      if (currentNode.node_key === "welcome") {
+        if (lowerId.includes("home") || lowerTitle.includes("home")) {
+          varPatches.customer_type = "Home";
+        } else if (lowerId.includes("comm") || lowerTitle.includes("commercial")) {
+          varPatches.customer_type = "Commercial";
+        }
+      } else if (
+        currentNode.node_key === "home_water_source" ||
+        lowerId.startsWith("src_") ||
+        lowerTitle.includes("water")
+      ) {
+        varPatches.water_source = cleanTitle;
+        varPatches.customer_type = varPatches.customer_type || "Home";
+      } else if (
+        currentNode.node_key === "comm_business_type" ||
+        lowerId.startsWith("biz_") ||
+        lowerTitle.includes("business")
+      ) {
+        varPatches.business_type = cleanTitle;
+        varPatches.customer_type = varPatches.customer_type || "Commercial";
+      } else if (
+        currentNode.node_key === "home_requirement" ||
+        currentNode.node_key === "comm_requirement" ||
+        lowerId.includes("srv_")
+      ) {
+        varPatches.requirement_category = cleanTitle;
+      }
+      varPatches.last_selected_option = cleanTitle;
+    }
+
+    const newVars = { ...run.vars, ...varPatches };
+    if (!(await claimReplyTransition(db, run, matched, { vars: newVars }))) {
       return lostReplyRace(db, run, currentNode.node_key);
     }
+    run.vars = newVars;
     const outcome = await advanceFromNodeKey(db, run, matched, nodes);
     return {
       consumed: true,
@@ -1234,6 +1644,8 @@ async function handleReplyForActiveRun(
         await sendButtonsAndSuspend(db, run, currentNode);
       } else if (currentNode.node_type === "send_list") {
         await sendListAndSuspend(db, run, currentNode);
+      } else if (currentNode.node_type === "appointment_form") {
+        await sendAppointmentFormAndSuspend(db, run, currentNode);
       } else if (currentNode.node_type === "collect_input") {
         // Customer typed something we couldn't accept (empty after trim,
         // or var_key missing — rare). Re-send the prompt so they try again.

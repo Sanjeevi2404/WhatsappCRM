@@ -711,3 +711,37 @@ export interface QuickReply {
   created_at: string;
   updated_at: string;
 }
+
+// ============================================================
+// Appointments (migration 060)
+// ============================================================
+
+export type AppointmentStatus =
+  | 'pending'
+  | 'confirmed'
+  | 'completed'
+  | 'cancelled'
+  | 'no_show';
+
+export interface Appointment {
+  id: string;
+  account_id: string;
+  contact_id?: string | null;
+  conversation_id?: string | null;
+  deal_id?: string | null;
+  customer_name: string;
+  phone: string;
+  email?: string | null;
+  appointment_date: string;
+  appointment_time: string;
+  appointment_type: string;
+  location?: string | null;
+  additional_requirements?: string | null;
+  status: AppointmentStatus;
+  form_data: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  contact?: Contact;
+  deal?: Deal;
+}
+

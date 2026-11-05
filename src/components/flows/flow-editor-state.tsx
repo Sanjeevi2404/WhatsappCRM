@@ -175,6 +175,21 @@ export function defaultConfigFor(type: NodeType): Record<string, unknown> {
         var_key: "answer",
         next_node_key: "",
       };
+    case "appointment_form":
+      return {
+        screen_title: "SAI RO – Book Appointment",
+        body_text: "Please provide your details below to schedule your appointment with SAI RO:",
+        button_label: "Book Appointment",
+        create_lead: true,
+        pipeline_stage_id: "",
+        fields: [
+          { id: "customer_name", label: "Customer Name", type: "text", required: true, is_custom: false },
+          { id: "location", label: "Area / Location", type: "text", required: true, is_custom: false },
+          { id: "phone", label: "Contact Number", type: "phone", required: true, is_custom: false },
+          { id: "additional_requirements", label: "Specific Requirement", type: "textarea", required: true, is_custom: false },
+        ],
+        next_node_key: "",
+      };
     case "condition":
       return {
         subject: "var",
@@ -243,21 +258,36 @@ export function FlowEditorProvider({
   const router = useRouter();
   const t = useTranslations("Flows.editorState");
 
-  const [state, setStateRaw] = useState<BuilderState>(() => ({
-    name: initialFlow.name,
-    description: initialFlow.description ?? "",
-    trigger_type: initialFlow.trigger_type,
-    trigger_config: initialFlow.trigger_config as Record<string, unknown>,
-    entry_node_id: initialFlow.entry_node_id,
-    status: initialFlow.status,
-    nodes: initialNodes.map((n) => ({
-      node_key: n.node_key,
-      node_type: n.node_type as NodeType,
-      config: n.config as Record<string, unknown>,
-      position_x: n.position_x,
-      position_y: n.position_y,
-    })),
-  }));
+  const [state, setStateRaw] = useState<BuilderState>(() => {
+    const seenKeys = new Set<string>();
+    const deduplicatedNodes: BuilderNode[] = [];
+    for (const n of initialNodes) {
+      let key = n.node_key;
+      if (seenKeys.has(key)) {
+        let i = 2;
+        while (seenKeys.has(`${key}_${i}`)) i++;
+        key = `${key}_${i}`;
+      }
+      seenKeys.add(key);
+      deduplicatedNodes.push({
+        node_key: key,
+        node_type: n.node_type as NodeType,
+        config: n.config as Record<string, unknown>,
+        position_x: n.position_x,
+        position_y: n.position_y,
+      });
+    }
+
+    return {
+      name: initialFlow.name,
+      description: initialFlow.description ?? "",
+      trigger_type: initialFlow.trigger_type,
+      trigger_config: initialFlow.trigger_config as Record<string, unknown>,
+      entry_node_id: initialFlow.entry_node_id,
+      status: initialFlow.status,
+      nodes: deduplicatedNodes,
+    };
+  });
 
   const [saving, setSaving] = useState(false);
   const [activating, setActivating] = useState(false);

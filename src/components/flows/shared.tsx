@@ -17,6 +17,7 @@
  */
 
 import {
+  CalendarCheck,
   Flag,
   GitFork,
   Inbox,
@@ -47,6 +48,7 @@ export type NodeType =
   | 'send_list'
   | 'send_media'
   | 'collect_input'
+  | 'appointment_form'
   | 'condition'
   | 'set_tag'
   | 'handoff'
@@ -133,6 +135,12 @@ export const NODE_META: Record<
     color: 'text-teal-400',
     category: 'logic',
   },
+  appointment_form: {
+    slugSeed: 'Appointment Booking Form',
+    icon: CalendarCheck,
+    color: 'text-purple-400',
+    category: 'messaging',
+  },
   condition: {
     slugSeed: 'If / else',
     icon: GitFork,
@@ -193,6 +201,7 @@ const NODE_HUE: Record<NodeType, { l: number; c: number; h: number }> = {
   send_list: { l: 0.62, c: 0.15, h: 277 }, // indigo
   send_media: { l: 0.65, c: 0.12, h: 210 }, // sky
   collect_input: { l: 0.65, c: 0.1, h: 185 }, // teal — capture
+  appointment_form: { l: 0.63, c: 0.17, h: 305 }, // purple — booking form
   condition: { l: 0.72, c: 0.15, h: 65 }, // amber — a fork in the road
   set_tag: { l: 0.65, c: 0.15, h: 350 }, // pink
   handoff: { l: 0.65, c: 0.17, h: 16 }, // rose — hands off
@@ -368,6 +377,14 @@ export function summarizeNode(
           : truncate(prompt);
       }
       return varKey ? `→ vars.${varKey}` : null;
+    }
+    case 'appointment_form': {
+      const title =
+        typeof cfg.screen_title === 'string' && cfg.screen_title
+          ? cfg.screen_title
+          : 'Appointment Booking Form';
+      const fields = Array.isArray(cfg.fields) ? cfg.fields : [];
+      return `${title} · ${fields.length} field${fields.length === 1 ? '' : 's'}`;
     }
     case 'condition': {
       const subjectKey =

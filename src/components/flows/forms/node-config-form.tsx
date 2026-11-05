@@ -26,9 +26,15 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Calendar,
+  ChevronDown,
+  Eye,
+  EyeOff,
   Loader2,
   Paperclip,
   Plus,
+  Smartphone,
+  Sparkles,
   Trash2,
   Upload,
   X,
@@ -36,6 +42,7 @@ import {
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -49,6 +56,11 @@ import { cn } from "@/lib/utils";
 import { uploadAccountMedia, MEDIA_MAX_BYTES } from "@/lib/storage/upload-media";
 import { slugify, type BuilderNode } from "../shared";
 import { NextNodeRow, NodeKeySelect, TextRow } from "./fields";
+import type {
+  AppointmentFormNodeConfig,
+  FormFieldDefinition,
+  FormFieldType,
+} from "@/lib/flows/types";
 
 interface NodeConfigFormProps {
   node: BuilderNode;
@@ -174,6 +186,16 @@ export function NodeConfigForm({
         </>
       );
 
+    case "appointment_form":
+      return (
+        <AppointmentFormConfigView
+          cfg={cfg as Partial<AppointmentFormNodeConfig>}
+          allNodes={allNodes}
+          currentKey={node.node_key}
+          onUpdateConfig={onUpdateConfig}
+        />
+      );
+
     case "condition":
       return (
         <ConditionForm
@@ -198,12 +220,21 @@ export function NodeConfigForm({
 
     case "handoff":
       return (
-        <TextRow
-          label={t("internalNote")}
-          value={(cfg as { note?: string }).note ?? ""}
-          onChange={(v) => onUpdateConfig({ note: v })}
-          rows={2}
-        />
+        <>
+          <TextRow
+            label={t("internalNote")}
+            value={(cfg as { note?: string }).note ?? ""}
+            onChange={(v) => onUpdateConfig({ note: v })}
+            rows={2}
+          />
+          <NextNodeRow
+            value={(cfg as { next_node_key?: string }).next_node_key ?? ""}
+            allNodes={allNodes}
+            currentKey={node.node_key}
+            onChange={(v) => onUpdateConfig({ next_node_key: v })}
+            label="Next node (optional)"
+          />
+        </>
       );
 
     case "end":
@@ -1063,3 +1094,391 @@ function SendMediaForm({
     </>
   );
 }
+
+// ============================================================
+// appointment_form
+// ============================================================
+
+function AppointmentFormConfigView({
+  cfg,
+  allNodes,
+  currentKey,
+  onUpdateConfig,
+}: {
+  cfg: Partial<AppointmentFormNodeConfig>;
+  allNodes: BuilderNode[];
+  currentKey: string;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+}) {
+  const [showPreview, setShowPreview] = useState(false);
+  const [editingSelectFieldId, setEditingSelectFieldId] = useState<string | null>(null);
+  const [newOptionText, setNewOptionText] = useState("");
+
+  const fields: FormFieldDefinition[] = Array.isArray(cfg.fields)
+    ? (cfg.fields as FormFieldDefinition[])
+    : [];
+
+  const updateFields = (newFields: FormFieldDefinition[]) => {
+    onUpdateConfig({ fields: newFields });
+  };
+
+  const handleUpdateField = (
+    id: string,
+    patch: Partial<FormFieldDefinition>,
+  ) => {
+    updateFields(
+      fields.map((f) => (f.id === id ? { ...f, ...patch } : f)),
+    );
+  };
+
+  const handleAddField = () => {
+    const newId = `custom_${Date.now()}`;
+    const newField: FormFieldDefinition = {
+      id: newId,
+      label: "New Custom Field",
+      type: "text",
+      required: false,
+      is_custom: true,
+    };
+    updateFields([...fields, newField]);
+  };
+
+  const handleRemoveField = (id: string) => {
+    updateFields(fields.filter((f) => f.id !== id));
+  };
+
+  const handleAddOption = (fieldId: string) => {
+    if (!newOptionText.trim()) return;
+    const target = fields.find((f) => f.id === fieldId);
+    if (!target) return;
+    const currentOptions = target.options ?? [];
+    handleUpdateField(fieldId, {
+      options: [...currentOptions, newOptionText.trim()],
+    });
+    setNewOptionText("");
+  };
+
+  const handleRemoveOption = (fieldId: string, indexToRemove: number) => {
+    const target = fields.find((f) => f.id === fieldId);
+    if (!target) return;
+    const currentOptions = target.options ?? [];
+    handleUpdateField(fieldId, {
+      options: currentOptions.filter((_, i) => i !== indexToRemove),
+    });
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Screen Title & Prompt Message */}
+      <div className="space-y-3">
+        <div>
+          <label className="mb-1 block text-xs font-medium text-foreground">
+            Form Screen Title
+          </label>
+          <Input
+            value={cfg.screen_title ?? ""}
+            onChange={(e) => onUpdateConfig({ screen_title: e.target.value })}
+            placeholder="e.g. Schedule an Appointment"
+            className="bg-muted text-xs"
+          />
+        </div>
+
+        <TextRow
+          label="Message Sent to Customer"
+          value={cfg.body_text ?? ""}
+          onChange={(v) => onUpdateConfig({ body_text: v })}
+          rows={2}
+        />
+
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-xs text-muted-foreground">
+              Button CTA Label
+            </label>
+            <Input
+              value={cfg.button_label ?? "Book Appointment"}
+              onChange={(e) => onUpdateConfig({ button_label: e.target.value })}
+              placeholder="Book Appointment"
+              className="bg-muted text-xs"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-muted-foreground">
+              Meta Flow ID (Optional)
+            </label>
+            <Input
+              value={cfg.meta_flow_id ?? ""}
+              onChange={(e) => onUpdateConfig({ meta_flow_id: e.target.value })}
+              placeholder="e.g. 123456789012345"
+              className="bg-muted font-mono text-xs"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Field Configuration Header */}
+      <div className="rounded-lg border border-border bg-card p-3">
+        <div className="mb-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Calendar className="h-4 w-4 text-primary" />
+            <span className="text-xs font-semibold text-foreground">
+              Form Fields ({fields.length})
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setShowPreview(!showPreview)}
+              className="h-7 gap-1 text-[11px]"
+            >
+              {showPreview ? (
+                <>
+                  <EyeOff className="h-3 w-3" /> Hide Preview
+                </>
+              ) : (
+                <>
+                  <Eye className="h-3 w-3" /> Live Preview
+                </>
+              )}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={handleAddField}
+              className="h-7 gap-1 bg-primary text-[11px] text-primary-foreground hover:bg-primary/90"
+            >
+              <Plus className="h-3 w-3" /> Add Field
+            </Button>
+          </div>
+        </div>
+
+        {/* Live Form Preview Drawer/Card */}
+        {showPreview && (
+          <div className="mb-4 rounded-xl border border-primary/30 bg-muted/40 p-3 shadow-inner">
+            <div className="mx-auto max-w-xs rounded-xl border border-border bg-background p-3 shadow-lg">
+              {/* WhatsApp Flow Screen Top Bar */}
+              <div className="mb-3 flex items-center justify-between border-b border-border pb-2 text-[11px] font-semibold text-foreground">
+                <span className="flex items-center gap-1.5">
+                  <Smartphone className="h-3.5 w-3.5 text-primary" />
+                  {cfg.screen_title || "Appointment Booking"}
+                </span>
+                <Badge variant="secondary" className="text-[9px] px-1 py-0">
+                  WhatsApp Flow
+                </Badge>
+              </div>
+
+              {/* Form Body Preview */}
+              <div className="space-y-2.5 max-h-64 overflow-y-auto pr-1">
+                {fields.map((f) => (
+                  <div key={f.id} className="space-y-1">
+                    <label className="text-[10px] font-medium text-foreground flex items-center gap-1">
+                      {f.label}
+                      {f.required && <span className="text-destructive">*</span>}
+                    </label>
+                    {f.type === "textarea" ? (
+                      <div className="h-10 rounded border border-input bg-muted/30 px-2 py-1 text-[10px] text-muted-foreground">
+                        {f.placeholder || "Enter requirements..."}
+                      </div>
+                    ) : f.type === "select" ? (
+                      <div className="flex h-7 items-center justify-between rounded border border-input bg-muted/30 px-2 text-[10px] text-muted-foreground">
+                        <span>{f.options?.[0] || "Select an option..."}</span>
+                        <ChevronDown className="h-3 w-3 opacity-50" />
+                      </div>
+                    ) : (
+                      <div className="flex h-7 items-center rounded border border-input bg-muted/30 px-2 text-[10px] text-muted-foreground">
+                        {f.type === "date" ? "YYYY-MM-DD" : f.type === "time" ? "HH:MM" : f.placeholder || f.label}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {/* Submit CTA Preview */}
+              <div className="mt-3 pt-2 border-t border-border">
+                <div className="flex h-8 w-full items-center justify-center rounded-lg bg-emerald-600 font-medium text-white text-[11px] shadow-sm">
+                  {cfg.button_label || "Submit Appointment"}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Fields List */}
+        <div className="space-y-2">
+          {fields.map((field) => (
+            <div
+              key={field.id}
+              className="rounded-md border border-border bg-background p-2.5 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <div className="flex-1">
+                  <Input
+                    value={field.label}
+                    onChange={(e) =>
+                      handleUpdateField(field.id, { label: e.target.value })
+                    }
+                    placeholder="Field Label"
+                    className="h-7 bg-muted text-xs font-medium"
+                  />
+                </div>
+
+                <div className="w-28">
+                  <Select
+                    value={field.type}
+                    onValueChange={(v) =>
+                      handleUpdateField(field.id, {
+                        type: v as FormFieldType,
+                        options:
+                          v === "select" && !field.options
+                            ? ["Option 1", "Option 2"]
+                            : field.options,
+                      })
+                    }
+                  >
+                    <SelectTrigger className="h-7 bg-muted text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="text">Text</SelectItem>
+                      <SelectItem value="phone">Phone</SelectItem>
+                      <SelectItem value="email">Email</SelectItem>
+                      <SelectItem value="date">Date</SelectItem>
+                      <SelectItem value="time">Time</SelectItem>
+                      <SelectItem value="select">Dropdown</SelectItem>
+                      <SelectItem value="textarea">Textarea</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex items-center gap-1.5 pl-1">
+                  <label
+                    htmlFor={`req-${field.id}`}
+                    className="cursor-pointer text-[10px] text-muted-foreground select-none"
+                  >
+                    Required
+                  </label>
+                  <input
+                    id={`req-${field.id}`}
+                    type="checkbox"
+                    checked={field.required}
+                    onChange={(e) =>
+                      handleUpdateField(field.id, { required: e.target.checked })
+                    }
+                    className="h-3.5 w-3.5 rounded border-border accent-primary cursor-pointer"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleRemoveField(field.id)}
+                  title="Delete field"
+                  className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+
+              {/* Sub-options for Select dropdown */}
+              {field.type === "select" && (
+                <div className="mt-2.5 rounded border border-border/80 bg-muted/20 p-2 text-xs">
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <span className="text-[10px] font-medium text-muted-foreground">
+                      Dropdown Options:
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEditingSelectFieldId(
+                          editingSelectFieldId === field.id ? null : field.id,
+                        )
+                      }
+                      className="text-[10px] text-primary hover:underline"
+                    >
+                      {editingSelectFieldId === field.id ? "Done" : "Edit Options"}
+                    </button>
+                  </div>
+
+                  <div className="flex flex-wrap gap-1">
+                    {(field.options ?? []).map((opt, optIdx) => (
+                      <span
+                        key={optIdx}
+                        className="inline-flex items-center gap-1 rounded bg-muted px-2 py-0.5 text-[10px] text-foreground"
+                      >
+                        {opt}
+                        {editingSelectFieldId === field.id && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveOption(field.id, optIdx)}
+                            className="hover:text-destructive"
+                          >
+                            <X className="h-2.5 w-2.5" />
+                          </button>
+                        )}
+                      </span>
+                    ))}
+                  </div>
+
+                  {editingSelectFieldId === field.id && (
+                    <div className="mt-2 flex gap-1">
+                      <Input
+                        value={newOptionText}
+                        onChange={(e) => setNewOptionText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            handleAddOption(field.id);
+                          }
+                        }}
+                        placeholder="Add new option..."
+                        className="h-6 flex-1 bg-background text-[10px]"
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => handleAddOption(field.id)}
+                        className="h-6 px-2 text-[10px]"
+                      >
+                        Add
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* CRM Lead / Pipeline Integration */}
+      <div className="rounded-lg border border-border bg-card p-3 space-y-2">
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-medium text-foreground cursor-pointer flex items-center gap-2">
+            <Sparkles className="h-3.5 w-3.5 text-primary" />
+            Create Lead in CRM Pipeline on submission
+          </label>
+          <input
+            type="checkbox"
+            checked={cfg.create_lead !== false}
+            onChange={(e) => onUpdateConfig({ create_lead: e.target.checked })}
+            className="h-4 w-4 rounded border-border accent-primary cursor-pointer"
+          />
+        </div>
+        <p className="text-[10px] text-muted-foreground">
+          When customer books, an appointment lead is automatically created in the CRM deals pipeline.
+        </p>
+      </div>
+
+      {/* Advance to next node */}
+      <NextNodeRow
+        value={cfg.next_node_key ?? ""}
+        allNodes={allNodes}
+        currentKey={currentKey}
+        onChange={(v) => onUpdateConfig({ next_node_key: v })}
+        label="Advance After Submission"
+      />
+    </div>
+  );
+}
+

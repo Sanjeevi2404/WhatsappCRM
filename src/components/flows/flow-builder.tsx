@@ -178,9 +178,9 @@ export function FlowBuilder() {
             {t.rich('nodesEmpty', { strong: (chunks) => <strong>{chunks}</strong> })}
           </div>
         ) : (
-          state.nodes.map((node) => (
+          state.nodes.map((node, index) => (
             <NodeCard
-              key={node.node_key}
+              key={`${node.node_key}-${index}`}
               node={node}
               allNodes={state.nodes}
               expanded={expandedWithFlash.has(node.node_key)}
@@ -586,6 +586,7 @@ function AddNodeButton({ onAdd, t }: { onAdd: (type: NodeType) => void; t: Retur
     'send_list',
     'send_message',
     'send_media',
+    'appointment_form',
     'collect_input',
     'condition',
     'set_tag',

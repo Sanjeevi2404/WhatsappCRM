@@ -31,7 +31,7 @@ describe("deriveCanvasEdges — single-outgoing node types", () => {
     });
   });
 
-  it("derives a `next` edge from send_media, set_tag, collect_input, start", () => {
+  it("derives a `next` edge from send_media, set_tag, collect_input, appointment_form, handoff, start", () => {
     const edges = deriveCanvasEdges(
       nodes(
         { node_key: "s", node_type: "start", config: { next_node_key: "m" } },
@@ -55,18 +55,39 @@ describe("deriveCanvasEdges — single-outgoing node types", () => {
           config: {
             prompt_text: "p",
             var_key: "v",
+            next_node_key: "af",
+          },
+        },
+        {
+          node_key: "af",
+          node_type: "appointment_form",
+          config: {
+            screen_title: "Title",
+            body_text: "Body",
+            button_label: "Open",
+            fields: [],
+            next_node_key: "h",
+          },
+        },
+        {
+          node_key: "h",
+          node_type: "handoff",
+          config: {
+            note: "Handoff lead",
             next_node_key: "e",
           },
         },
         { node_key: "e", node_type: "end", config: {} },
       ),
     );
-    expect(edges).toHaveLength(4);
+    expect(edges).toHaveLength(6);
     expect(edges.map((e) => `${e.source}->${e.target}`)).toEqual([
       "s->m",
       "m->t",
       "t->ci",
-      "ci->e",
+      "ci->af",
+      "af->h",
+      "h->e",
     ]);
   });
 
@@ -368,10 +389,7 @@ describe("outgoingSlots", () => {
     expect(slots.map((s) => s.id)).toEqual(["row:o1", "row:o2"]);
   });
 
-  it("terminal nodes (handoff / end) have no outgoing slots", () => {
-    expect(
-      outgoingSlots({ node_key: "h", node_type: "handoff", config: {} }),
-    ).toEqual([]);
+  it("terminal node (end) has no outgoing slots", () => {
     expect(
       outgoingSlots({ node_key: "e", node_type: "end", config: {} }),
     ).toEqual([]);
@@ -472,14 +490,7 @@ describe("applyEdgeConnection", () => {
     expect(patch.sections[1].rows[0].next_node_key).toBe("tgt");
   });
 
-  it("returns null for terminal nodes (no outgoing)", () => {
-    expect(
-      applyEdgeConnection(
-        { node_key: "h", node_type: "handoff", config: {} },
-        "next",
-        "x",
-      ),
-    ).toBeNull();
+  it("returns null for terminal node (end) (no outgoing)", () => {
     expect(
       applyEdgeConnection(
         { node_key: "e", node_type: "end", config: {} },

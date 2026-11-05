@@ -1496,7 +1496,7 @@
         "optionN": "Option {n}"
       },
       "categories": {
-        "messaging": "Messaging",
+        "messaging": "Messaging / Forms",
         "logic": "Logic & data",
         "flow": "Flow control"
       },
@@ -1520,6 +1520,10 @@
         "send_media": {
           "label": "Send media",
           "blurb": "Sends an image, video, or document"
+        },
+        "appointment_form": {
+          "label": "Appointment Booking Form",
+          "blurb": "Sends an interactive appointment booking form"
         },
         "collect_input": {
           "label": "Collect input",

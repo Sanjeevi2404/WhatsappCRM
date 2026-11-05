@@ -83,9 +83,10 @@ interface WhatsAppMessage {
    * to advance the per-contact run.
    */
   interactive?: {
-    type: 'button_reply' | 'list_reply'
+    type: 'button_reply' | 'list_reply' | 'nfm_reply'
     button_reply?: { id: string; title: string }
     list_reply?: { id: string; title: string; description?: string }
+    nfm_reply?: { name: string; body: string; response_json: string }
   }
   /**
    * Set when the customer taps a QUICK_REPLY button on a *template*
@@ -805,7 +806,20 @@ async function processMessage(
     contactId: contactRecord.id,
     conversationId: conversation.id,
     message:
-      interactiveReplyId
+      message.interactive?.nfm_reply
+        ? {
+            kind: 'nfm_reply',
+            meta_message_id: message.id,
+            data: (() => {
+              try {
+                return JSON.parse(message.interactive.nfm_reply.response_json)
+              } catch {
+                return {}
+              }
+            })(),
+            raw_json: message.interactive.nfm_reply.response_json,
+          }
+        : interactiveReplyId
         ? {
             kind: 'interactive_reply',
             reply_id: interactiveReplyId,
@@ -1091,11 +1105,28 @@ async function parseMessageContent(
 
     case 'interactive': {
       // The customer tapped a reply button or a list row on a message
-      // we previously sent. Meta delivers `interactive.button_reply` for
-      // 3-button messages and `interactive.list_reply` for list messages.
-      // Use the human-readable title as contentText so the inbox bubble
-      // renders the tap legibly ("Existing customer"), and stash the
-      // stable id separately so the Flows engine can route on it.
+      // we previously sent, or submitted a native WhatsApp Flow form (nfm_reply).
+      if (message.interactive?.nfm_reply) {
+        const nfm = message.interactive.nfm_reply
+        let summary = 'Appointment Form Submitted'
+        try {
+          const parsed = JSON.parse(nfm.response_json)
+          const parts: string[] = []
+          if (parsed.customer_name) parts.push(String(parsed.customer_name))
+          if (parsed.appointment_date) parts.push(String(parsed.appointment_date))
+          if (parsed.appointment_time) parts.push(String(parsed.appointment_time))
+          if (parsed.appointment_type) parts.push(String(parsed.appointment_type))
+          if (parts.length > 0) summary = `📅 Form: ${parts.join(' · ')}`
+        } catch {
+          // ignore JSON parse error
+        }
+        return {
+          ...empty,
+          contentText: summary,
+          interactiveReplyId: 'nfm_reply',
+        }
+      }
+
       const reply =
         message.interactive?.button_reply ?? message.interactive?.list_reply
       if (reply?.id) {

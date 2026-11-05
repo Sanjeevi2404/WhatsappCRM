@@ -48,7 +48,9 @@ export function deriveCanvasEdges(nodes: BuilderNode[]): CanvasEdge[] {
       case "send_message":
       case "send_media":
       case "collect_input":
-      case "set_tag": {
+      case "appointment_form":
+      case "set_tag":
+      case "handoff": {
         const next = (cfg as { next_node_key?: string }).next_node_key;
         if (next && knownKeys.has(next)) {
           edges.push({
@@ -178,7 +180,9 @@ export function outgoingSlots(node: BuilderNode): OutgoingSlot[] {
     case "send_message":
     case "send_media":
     case "collect_input":
+    case "appointment_form":
     case "set_tag":
+    case "handoff":
       return [{ id: "next", label: "Next" }];
 
     case "condition":
@@ -226,7 +230,6 @@ export function outgoingSlots(node: BuilderNode): OutgoingSlot[] {
       return slots;
     }
 
-    case "handoff":
     case "end":
       return [];
   }
@@ -252,7 +255,9 @@ export function applyEdgeConnection(
     case "send_message":
     case "send_media":
     case "collect_input":
+    case "appointment_form":
     case "set_tag":
+    case "handoff":
       if (sourceHandle === "next") return { next_node_key: targetKey };
       return null;
 
@@ -310,7 +315,6 @@ export function applyEdgeConnection(
       return matched ? { sections: next } : null;
     }
 
-    case "handoff":
     case "end":
       return null;
   }
@@ -346,7 +350,9 @@ function patchedConfigWithoutKey(
     case "send_message":
     case "send_media":
     case "collect_input":
-    case "set_tag": {
+    case "appointment_form":
+    case "set_tag":
+    case "handoff": {
       const next = (cfg as { next_node_key?: string }).next_node_key;
       if (next !== deletedKey) return null;
       return { ...cfg, next_node_key: "" };

@@ -19,6 +19,8 @@ const h = vi.hoisted(() => ({
     events: [] as Record<string, unknown>[],
     /** Every UPDATE, by table. */
     updates: [] as { table: string; row: Record<string, unknown> }[],
+    appointments: [] as Record<string, unknown>[],
+    deals: [] as Record<string, unknown>[],
   },
   sendButtons: vi.fn<
     (
@@ -30,6 +32,11 @@ const h = vi.hoisted(() => ({
       args: Parameters<typeof engineSendInteractiveList>[0],
     ) => Promise<{ whatsapp_message_id: string }>
   >(async () => ({ whatsapp_message_id: "wamid.4" })),
+  sendAppointmentForm: vi.fn<
+    (
+      args: Parameters<typeof engineSendAppointmentForm>[0],
+    ) => Promise<{ whatsapp_message_id: string }>
+  >(async () => ({ whatsapp_message_id: "wamid.5" })),
 }));
 
 vi.mock("./admin-client", () => {
@@ -37,6 +44,12 @@ vi.mock("./admin-client", () => {
     if (table === "flow_runs") return h.state.activeRuns;
     if (table === "flows") return h.state.flows;
     if (table === "flow_nodes") return h.state.nodes;
+    if (table === "contacts") {
+      return [{ id: "ct-1", name: "Existing Name", phone: "1234567890", email: null }];
+    }
+    if (table === "pipeline_stages") {
+      return [{ id: "stage-1", pipeline_id: "pipe-1" }];
+    }
     return [];
   }
 
@@ -55,7 +68,17 @@ vi.mock("./admin-client", () => {
       },
       insert: (row: Record<string, unknown>) => {
         if (table === "flow_run_events") h.state.events.push(row);
-        return b;
+        if (table === "appointments") h.state.appointments.push(row);
+        if (table === "deals") h.state.deals.push(row);
+        return {
+          ...b,
+          select: () => ({
+            maybeSingle: async () => ({
+              data: { id: "inserted-1", ...row },
+              error: null,
+            }),
+          }),
+        };
       },
       maybeSingle: async () => ({ data: rows(table)[0] ?? null, error: null }),
       single: async () => ({ data: rows(table)[0] ?? null, error: null }),
@@ -83,6 +106,7 @@ vi.mock("./meta-send", () => ({
   engineSendMedia: vi.fn(async () => ({ whatsapp_message_id: "wamid.2" })),
   engineSendInteractiveButtons: h.sendButtons,
   engineSendInteractiveList: h.sendList,
+  engineSendAppointmentForm: h.sendAppointmentForm,
 }));
 
 import {
@@ -98,6 +122,7 @@ import {
 import type {
   engineSendInteractiveButtons,
   engineSendInteractiveList,
+  engineSendAppointmentForm,
 } from "./meta-send";
 import type { ParsedInbound } from "./types";
 
@@ -303,6 +328,7 @@ describe("node classification helpers", () => {
     expect(isSuspending("send_buttons")).toBe(true);
     expect(isSuspending("send_list")).toBe(true);
     expect(isSuspending("collect_input")).toBe(true);
+    expect(isSuspending("appointment_form")).toBe(true);
     expect(isSuspending("start")).toBe(false);
     expect(isSuspending("send_message")).toBe(false);
     expect(isSuspending("condition")).toBe(false);
@@ -327,6 +353,7 @@ describe("node classification helpers", () => {
       "send_list",
       "send_media",
       "collect_input",
+      "appointment_form",
       "condition",
       "set_tag",
       "handoff",
@@ -676,3 +703,213 @@ describe("send_buttons / send_list interpolate {{vars.*}} (#553)", () => {
     );
   });
 });
+
+describe("appointment_form node execution and submission", () => {
+  const APPOINTMENT_NODE = {
+    id: "n-appt",
+    flow_id: "flow-1",
+    node_key: "book_appt",
+    node_type: "appointment_form",
+    config: {
+      screen_title: "SAI RO – Book Appointment",
+      body_text: "Please provide your details below:",
+      button_label: "Book Appointment",
+      create_lead: true,
+      fields: [
+        { id: "customer_name", label: "Name", type: "text", required: true },
+        { id: "location", label: "Area/Location", type: "text", required: true },
+        { id: "phone", label: "Contact Number", type: "phone", required: true },
+        { id: "additional_requirements", label: "Specific Requirement", type: "textarea", required: true },
+      ],
+      next_node_key: "confirmation",
+    },
+  };
+
+  const CONFIRMATION_NODE = {
+    id: "n-confirm",
+    flow_id: "flow-1",
+    node_key: "confirmation",
+    node_type: "send_message",
+    config: {
+      text: "Thank you! Your appointment is booked.",
+      next_node_key: "done",
+    },
+  };
+
+  beforeEach(() => {
+    h.state.activeRuns = [
+      {
+        ...RUN,
+        current_node_key: "book_appt",
+        vars: {},
+      },
+    ];
+    h.state.flows = [FLOW];
+    h.state.nodes = [
+      APPOINTMENT_NODE,
+      CONFIRMATION_NODE,
+      { id: "n9", flow_id: "flow-1", node_key: "done", node_type: "end", config: {} },
+    ];
+    h.state.events = [];
+    h.state.updates = [];
+    h.state.appointments = [];
+    h.state.deals = [];
+    vi.clearAllMocks();
+  });
+
+  it("handles nfm_reply submission: saves appointment, creates lead, updates contact, and advances", async () => {
+    const nfmMsg: ParsedInbound = {
+      kind: "nfm_reply",
+      meta_message_id: "m-flow-reply",
+      raw_json: JSON.stringify({
+        customer_name: "Ramesh Kumar",
+        location: "Madurai Anna Nagar",
+        phone: "+919876543210",
+        additional_requirements: "Commercial RO plant 2000 LPH",
+      }),
+      data: {
+        customer_name: "Ramesh Kumar",
+        location: "Madurai Anna Nagar",
+        phone: "+919876543210",
+        additional_requirements: "Commercial RO plant 2000 LPH",
+      },
+    };
+
+    const result = await dispatch(nfmMsg);
+
+    expect(result).toMatchObject({ consumed: true, outcome: "completed" });
+
+    // 1. Saved to appointments table in Supabase
+    expect(h.state.appointments).toHaveLength(1);
+    expect(h.state.appointments[0]).toMatchObject({
+      customer_name: "Ramesh Kumar",
+      location: "Madurai Anna Nagar",
+      phone: "+919876543210",
+      additional_requirements: "Commercial RO plant 2000 LPH",
+      status: "pending",
+    });
+
+    // 2. Created a lead/deal in deals table
+    expect(h.state.deals).toHaveLength(1);
+    expect(h.state.deals[0]).toMatchObject({
+      title: expect.stringContaining("Ramesh Kumar"),
+      status: "open",
+    });
+
+    // 3. Contact updated with customer name
+    expect(h.state.updates).toContainEqual(
+      expect.objectContaining({
+        table: "contacts",
+        row: expect.objectContaining({ name: "Ramesh Kumar" }),
+      }),
+    );
+
+    // 4. Flow run advanced to confirmation with synthesized variables
+    expect(h.state.updates).toContainEqual(
+      expect.objectContaining({
+        table: "flow_runs",
+        row: expect.objectContaining({
+          current_node_key: "confirmation",
+          vars: expect.objectContaining({
+            customer_name: "Ramesh Kumar",
+            location: "Madurai Anna Nagar",
+            phone: "+919876543210",
+            additional_requirements: "Commercial RO plant 2000 LPH",
+            customer_details: expect.stringContaining("Ramesh Kumar"),
+          }),
+        }),
+      }),
+    );
+    expect(h.state.updates).toContainEqual(
+      expect.objectContaining({
+        table: "flow_runs",
+        row: expect.objectContaining({
+          status: "completed",
+          end_reason: "end_node",
+        }),
+      }),
+    );
+  });
+
+  it("captures interactive options (customer_type, water_source) and saves full CRM data", async () => {
+    h.state.activeRuns = [
+      {
+        ...RUN,
+        current_node_key: "welcome",
+        vars: {},
+      },
+    ];
+    h.state.flows = [FLOW];
+    h.state.nodes = [
+      {
+        id: "n-welcome",
+        flow_id: "flow-1",
+        node_key: "welcome",
+        node_type: "send_buttons",
+        config: {
+          text: "Welcome",
+          buttons: [
+            { reply_id: "home_use", title: "🏠 Home Use", next_node_key: "home_water_source" },
+            { reply_id: "commercial_use", title: "🏢 Commercial Use", next_node_key: "comm_business_type" },
+          ],
+        },
+      },
+      {
+        id: "n-water",
+        flow_id: "flow-1",
+        node_key: "home_water_source",
+        node_type: "send_list",
+        config: {
+          text: "Water source",
+          button_label: "Select",
+          sections: [
+            {
+              title: "Sources",
+              rows: [
+                { reply_id: "src_corp", title: "1. Corporation Water", next_node_key: "book_appt" },
+              ],
+            },
+          ],
+        },
+      },
+      APPOINTMENT_NODE,
+      CONFIRMATION_NODE,
+      { id: "n9", flow_id: "flow-1", node_key: "done", node_type: "end", config: {} },
+    ];
+
+    // 1. User taps "🏠 Home Use"
+    const step1 = await dispatch({
+      kind: "interactive_reply",
+      reply_id: "home_use",
+      reply_title: "🏠 Home Use",
+      meta_message_id: "m-btn-1",
+    });
+    expect(step1).toMatchObject({ consumed: true, outcome: "advanced" });
+    expect(h.state.updates).toContainEqual(
+      expect.objectContaining({
+        table: "flow_runs",
+        row: expect.objectContaining({
+          vars: expect.objectContaining({ customer_type: "Home" }),
+        }),
+      }),
+    );
+  });
+
+  it("handles text message fallback reply gracefully", async () => {
+    const textMsg: ParsedInbound = {
+      kind: "text",
+      text: "Need RO water purifier for residence in KK Nagar",
+      meta_message_id: "m-text",
+    };
+
+    const result = await dispatch(textMsg);
+
+    expect(result).toMatchObject({ consumed: true, outcome: "completed" });
+    expect(h.state.appointments).toHaveLength(1);
+    expect(h.state.appointments[0]).toMatchObject({
+      additional_requirements: "Need RO water purifier for residence in KK Nagar",
+      status: "pending",
+    });
+  });
+});
+

@@ -1,5 +1,6 @@
 import {
   sendInteractiveButtons,
+  sendInteractiveFlow,
   sendInteractiveList,
   sendMediaMessage,
   sendTextMessage,
@@ -498,3 +499,113 @@ async function sendInteractiveViaMeta(
 
   return { whatsapp_message_id: waMessageId }
 }
+
+export interface SendAppointmentFormEngineArgs {
+  accountId: string
+  userId: string
+  conversationId: string
+  contactId: string
+  screenTitle?: string
+  bodyText: string
+  buttonLabel: string
+  metaFlowId?: string
+}
+
+export async function engineSendAppointmentForm(
+  args: SendAppointmentFormEngineArgs
+): Promise<{ whatsapp_message_id: string }> {
+  const db = supabaseAdmin()
+  const { data: contact, error: contactErr } = await db
+    .from('contacts')
+    .select('id, phone, wa_user_id')
+    .eq('id', args.contactId)
+    .single()
+
+  if (contactErr || !contact) {
+    throw new Error(t('send.contactNotFound'))
+  }
+  await assertConversationInAccount(db, args.conversationId, args.accountId)
+  const { phoneNumberId, accessToken } = await loadAccountMetaCredentials(
+    db,
+    args.accountId
+  )
+  const sendTarget = resolveContactSendTarget(contact)
+  if (!sendTarget) {
+    throw new Error(
+      t('send.noWhatsAppAddress', { phone: contact.phone || t('send.none') })
+    )
+  }
+  const sanitized = sendTarget.target
+  const candidates =
+    sendTarget.isPhone ? phoneVariants(sanitized) : [sanitized]
+
+  let waMessageId: string | null = null
+  let lastErr: unknown = null
+
+  for (const cand of candidates) {
+    try {
+      if (args.metaFlowId?.trim()) {
+        const res = await sendInteractiveFlow({
+          phoneNumberId,
+          accessToken,
+          to: cand,
+          bodyText: args.bodyText,
+          buttonLabel: args.buttonLabel,
+          headerText: args.screenTitle,
+          flowId: args.metaFlowId.trim(),
+          flowCta: args.buttonLabel,
+        })
+        waMessageId = res.messageId
+      } else {
+        const res = await sendInteractiveButtons({
+          phoneNumberId,
+          accessToken,
+          to: cand,
+          bodyText: `${args.screenTitle ? `*${args.screenTitle}*\n\n` : ''}${args.bodyText}`,
+          buttons: [
+            {
+              id: 'book_now',
+              title: (args.buttonLabel || 'Book Appointment').slice(0, 20),
+            },
+          ],
+        })
+        waMessageId = res.messageId
+      }
+      break
+    } catch (err) {
+      lastErr = err
+      const msg = err instanceof Error ? err.message : String(err)
+      if (isRecipientNotAllowedError(msg)) continue
+      throw err
+    }
+  }
+
+  if (!waMessageId) {
+    throw lastErr instanceof Error ? lastErr : new Error('Send failed')
+  }
+
+  const { error: msgErr } = await db.from('messages').insert({
+    conversation_id: args.conversationId,
+    sender_type: 'bot',
+    content_type: 'interactive',
+    content_text: `${args.screenTitle ? `[${args.screenTitle}] ` : ''}${args.bodyText}`,
+    message_id: waMessageId,
+    status: 'sent',
+  })
+  if (msgErr) {
+    throw new Error(t('send.dbInsertFailed', { message: msgErr.message }))
+  }
+
+  await db
+    .from('conversations')
+    .update({
+      last_message_text: args.bodyText,
+      last_message_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', args.conversationId)
+    .eq('account_id', args.accountId)
+
+  return { whatsapp_message_id: waMessageId }
+}
+
