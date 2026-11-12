@@ -545,17 +545,39 @@ export async function engineSendAppointmentForm(
   for (const cand of candidates) {
     try {
       if (args.metaFlowId?.trim()) {
-        const res = await sendInteractiveFlow({
-          phoneNumberId,
-          accessToken,
-          to: cand,
-          bodyText: args.bodyText,
-          buttonLabel: args.buttonLabel,
-          headerText: args.screenTitle,
-          flowId: args.metaFlowId.trim(),
-          flowCta: args.buttonLabel,
-        })
-        waMessageId = res.messageId
+        try {
+          const res = await sendInteractiveFlow({
+            phoneNumberId,
+            accessToken,
+            to: cand,
+            bodyText: args.bodyText,
+            buttonLabel: args.buttonLabel,
+            headerText: args.screenTitle,
+            flowId: args.metaFlowId.trim(),
+            flowCta: args.buttonLabel,
+          })
+          waMessageId = res.messageId
+        } catch (flowErr) {
+          const flowErrMsg =
+            flowErr instanceof Error ? flowErr.message : String(flowErr)
+          console.warn(
+            '[flows] Meta Flow delivery failed, falling back to interactive booking button:',
+            flowErrMsg
+          )
+          const fallbackRes = await sendInteractiveButtons({
+            phoneNumberId,
+            accessToken,
+            to: cand,
+            bodyText: `${args.screenTitle ? `*${args.screenTitle}*\n\n` : ''}${args.bodyText}\n\n👉 Reply with your *Name, Area & Phone* or tap below:`,
+            buttons: [
+              {
+                id: 'book_now',
+                title: (args.buttonLabel || 'Book Appointment').slice(0, 20),
+              },
+            ],
+          })
+          waMessageId = fallbackRes.messageId
+        }
       } else {
         const res = await sendInteractiveButtons({
           phoneNumberId,
