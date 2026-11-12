@@ -1274,6 +1274,7 @@ export interface SendInteractiveFlowArgs {
   flowCta?: string
   screen?: string
   data?: Record<string, unknown>
+  mode?: 'draft' | 'published'
   contextMessageId?: string
 }
 
@@ -1298,54 +1299,69 @@ export async function sendInteractiveFlow(
     flowCta,
     screen,
     data,
+    mode,
     contextMessageId,
   } = args
 
   validateInteractiveBody(bodyText)
   validateInteractiveHeaderFooter(headerText, footerText)
 
-  const interactive: Record<string, unknown> = {
-    type: 'flow',
-    body: { text: bodyText },
-    action: {
-      name: 'flow',
-      parameters: {
-        flow_message_version: '3',
-        flow_token: flowToken,
-        flow_id: flowId,
-        flow_cta: flowCta || buttonLabel || 'Book Appointment',
-        flow_action: 'navigate',
-        ...(screen
-          ? {
-              flow_action_payload: {
-                screen,
-                ...(data ? { data } : {}),
-              },
-            }
-          : {}),
+  const send = async (flowMode?: 'draft' | 'published') => {
+    const params: Record<string, unknown> = {
+      flow_message_version: '3',
+      flow_token: flowToken,
+      flow_id: flowId,
+      flow_cta: flowCta || buttonLabel || 'Book Appointment',
+      flow_action: 'navigate',
+      ...(flowMode ? { mode: flowMode } : {}),
+      ...(screen
+        ? {
+            flow_action_payload: {
+              screen,
+              ...(data ? { data } : {}),
+            },
+          }
+        : {}),
+    }
+
+    const interactive: Record<string, unknown> = {
+      type: 'flow',
+      body: { text: bodyText },
+      action: {
+        name: 'flow',
+        parameters: params,
       },
-    },
-  }
-  if (headerText) interactive.header = { type: 'text', text: headerText }
-  if (footerText) interactive.footer = { text: footerText }
+    }
+    if (headerText) interactive.header = { type: 'text', text: headerText }
+    if (footerText) interactive.footer = { text: footerText }
 
-  const body: Record<string, unknown> = {
-    messaging_product: 'whatsapp',
-    ...recipientFields(to),
-    type: 'interactive',
-    interactive,
-  }
-  if (contextMessageId) body.context = { message_id: contextMessageId }
+    const body: Record<string, unknown> = {
+      messaging_product: 'whatsapp',
+      ...recipientFields(to),
+      type: 'interactive',
+      interactive,
+    }
+    if (contextMessageId) body.context = { message_id: contextMessageId }
 
-  const url = `${META_API_BASE}/${phoneNumberId}/messages`
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${accessToken}`,
-    },
-    body: JSON.stringify(body),
-  })
+    const url = `${META_API_BASE}/${phoneNumberId}/messages`
+    return fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(body),
+    })
+  }
+
+  let response = await send(mode)
+  if (!response.ok) {
+    const clone = response.clone()
+    const errorText = await clone.text().catch(() => '')
+    if (errorText.includes('DRAFT') || errorText.includes('131051')) {
+      response = await send('draft')
+    }
+  }
   if (!response.ok) {
     await throwMetaError(response, `Meta API error: ${response.status}`)
   }
