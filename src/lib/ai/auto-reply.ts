@@ -83,15 +83,38 @@ export async function dispatchInboundToAiReply(
 
     const { data: conv, error: convErr } = await db
       .from('conversations')
-      .select('assigned_agent_id, ai_autoreply_disabled, ai_reply_count')
+      .select('assigned_agent_id, ai_autoreply_disabled, ai_reply_count, last_reply_at')
       .eq('id', conversationId)
       .maybeSingle()
     if (convErr || !conv) return
     if (conv.assigned_agent_id) return // a human owns this thread
     if (conv.ai_autoreply_disabled) return // handed off / turned off here
-    // Cheap early-out; the authoritative cap check is the atomic claim
-    // below (this read can race a concurrent inbound).
-    if (conv.ai_reply_count >= config.autoReplyMaxPerConversation) return
+
+    // If the last bot reply was more than 24 hours ago (a new 24h WhatsApp session window),
+    // reset the count for the fresh session so returning customers aren't permanently locked out.
+    let replyCount = conv.ai_reply_count ?? 0
+    if (conv.last_reply_at) {
+      const msSinceLastReply = Date.now() - new Date(conv.last_reply_at).getTime()
+      if (msSinceLastReply > 24 * 60 * 60 * 1000) {
+        replyCount = 0
+        await db.from('conversations').update({ ai_reply_count: 0 }).eq('id', conversationId)
+      }
+    }
+
+    if (replyCount >= config.autoReplyMaxPerConversation) {
+      // Don't silently drop messages while the UI pretends AI is active.
+      // Automatically hand off to a human agent so the thread gets answered.
+      const summary = `AI auto-reply limit reached (${config.autoReplyMaxPerConversation} replies). Handed off to agent.`
+      const update: Record<string, unknown> = {
+        ai_autoreply_disabled: true,
+        ai_handoff_summary: summary,
+      }
+      if (config.handoffAgentId && !conv.assigned_agent_id) {
+        update.assigned_agent_id = config.handoffAgentId
+      }
+      await db.from('conversations').update(update).eq('id', conversationId)
+      return
+    }
 
     const messages = await buildConversationContext(db, conversationId)
     if (messages.length === 0) return

@@ -221,7 +221,7 @@ describe('dispatchInboundToAiReply — eligibility gates', () => {
     expect(h.engineSendText).not.toHaveBeenCalled()
   })
 
-  it('skips when the per-conversation cap is reached', async () => {
+  it('hands off when the per-conversation cap is reached', async () => {
     h.state.conv = {
       assigned_agent_id: null,
       ai_autoreply_disabled: false,
@@ -229,6 +229,24 @@ describe('dispatchInboundToAiReply — eligibility gates', () => {
     }
     await dispatchInboundToAiReply(ARGS)
     expect(h.engineSendText).not.toHaveBeenCalled()
+    expect(h.state.updatePayload).toMatchObject({
+      ai_autoreply_disabled: true,
+      ai_handoff_summary: expect.stringContaining('AI auto-reply limit reached'),
+    })
+  })
+
+  it('resets reply count when last bot reply was more than 24h ago', async () => {
+    const twoDaysAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
+    h.state.conv = {
+      assigned_agent_id: null,
+      ai_autoreply_disabled: false,
+      ai_reply_count: 3,
+      last_reply_at: twoDaysAgo,
+    }
+    await dispatchInboundToAiReply(ARGS)
+    // Reply count was reset from 3 to 0, so reply proceeds to generate and claim slot
+    expect(h.generateReply).toHaveBeenCalledTimes(1)
+    expect(h.engineSendText).toHaveBeenCalledTimes(1)
   })
 
   it('skips when there is nothing to reply to', async () => {
