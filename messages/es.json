@@ -1521,6 +1521,14 @@
           "label": "Enviar archivo",
           "blurb": "Envía una imagen, video o documento"
         },
+        "appointment_form": {
+          "label": "Formulario de Citas",
+          "blurb": "Envía un formulario interactivo para programar citas"
+        },
+        "ai_agent": {
+          "label": "Agente de IA",
+          "blurb": "Genera respuestas inteligentes basadas en la base de conocimientos"
+        },
         "collect_input": {
           "label": "Capturar respuesta",
           "blurb": "Hace una pregunta y guarda la respuesta"

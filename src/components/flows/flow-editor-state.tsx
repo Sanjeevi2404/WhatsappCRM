@@ -190,6 +190,13 @@ export function defaultConfigFor(type: NodeType): Record<string, unknown> {
         ],
         next_node_key: "",
       };
+    case "ai_agent":
+      return {
+        prompt: "",
+        use_knowledge_base: true,
+        output_var_key: "",
+        next_node_key: "",
+      };
     case "condition":
       return {
         subject: "var",

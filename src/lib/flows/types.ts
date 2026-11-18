@@ -205,6 +205,17 @@ export interface AppointmentFormNodeConfig {
   next_node_key: string;
 }
 
+export interface AiAgentNodeConfig {
+  /** Optional custom instructions or persona override for this AI step. If empty, uses account AI prompt. */
+  prompt?: string;
+  /** Whether to ground the generation with account's Knowledge Base articles. Defaults to true. */
+  use_knowledge_base?: boolean;
+  /** Optional variable name to store the generated AI reply in run.vars for downstream steps. */
+  output_var_key?: string;
+  /** Next node to advance to after the AI response is generated and sent. */
+  next_node_key: string;
+}
+
 // Terminal nodes carry no config — they just stop the run.
 export type EndNodeConfig = Record<string, never>;
 
@@ -221,6 +232,7 @@ export type FlowNodeConfig =
   | { node_type: "send_media"; config: SendMediaNodeConfig }
   | { node_type: "collect_input"; config: CollectInputNodeConfig }
   | { node_type: "appointment_form"; config: AppointmentFormNodeConfig }
+  | { node_type: "ai_agent"; config: AiAgentNodeConfig }
   | { node_type: "condition"; config: ConditionNodeConfig }
   | { node_type: "set_tag"; config: SetTagNodeConfig }
   | { node_type: "handoff"; config: HandoffNodeConfig }
@@ -413,6 +425,7 @@ export const AUTO_ADVANCING_NODE_TYPES: ReadonlySet<string> = new Set([
   "start",
   "send_message",
   "send_media",
+  "ai_agent",
   "condition",
   "set_tag",
 ]);

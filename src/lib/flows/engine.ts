@@ -45,6 +45,7 @@ import { addContactTagAndDispatch } from "@/lib/contacts/tag-events";
 import { removeContactTag } from "@/lib/contacts/tag-write";
 import { checkRunTimeout, markRunTimedOut, type RunTimeoutCheck } from "./timeout";
 import {
+  type AiAgentNodeConfig,
   type AppointmentFormNodeConfig,
   type CollectInputNodeConfig,
   type ConditionNodeConfig,
@@ -63,6 +64,13 @@ import {
   type KeywordTriggerConfig,
   AUTO_ADVANCING_NODE_TYPES,
 } from "./types";
+import { loadAiConfig } from "@/lib/ai/config";
+import { buildConversationContext } from "@/lib/ai/context";
+import { retrieveKnowledge } from "@/lib/ai/knowledge";
+import { generateReply } from "@/lib/ai/generate";
+import { buildSystemPrompt } from "@/lib/ai/defaults";
+import { logAiUsage } from "@/lib/ai/usage";
+import { latestUserMessage } from "@/lib/ai/query";
 
 // ============================================================
 // Pure helpers — extracted so engine.test.ts can exercise them
@@ -887,6 +895,94 @@ async function advanceFromNodeKey(
         await endRun(db, run.id, "failed", "send_media_failed");
         return { outcome: "completed" };
       }
+      currentKey = cfg.next_node_key;
+      continue;
+    }
+    if (node.node_type === "ai_agent") {
+      const cfg = node.config as unknown as AiAgentNodeConfig;
+      let replyText = "";
+      try {
+        const aiConfig = await loadAiConfig(db, run.account_id);
+        if (aiConfig && aiConfig.apiKey) {
+          const messages = run.conversation_id
+            ? await buildConversationContext(db, run.conversation_id)
+            : [];
+
+          let knowledge: string[] = [];
+          if (cfg.use_knowledge_base !== false) {
+            knowledge = await retrieveKnowledge(
+              db,
+              run.account_id,
+              aiConfig,
+              latestUserMessage(messages) || "Customer inquiry",
+            );
+          }
+
+          const customPrompt = cfg.prompt
+            ? interpolateVars(cfg.prompt, run.vars)
+            : aiConfig.systemPrompt;
+
+          const systemPrompt = buildSystemPrompt({
+            userPrompt: customPrompt,
+            mode: "auto_reply",
+            knowledge,
+          });
+
+          const gen = await generateReply({
+            config: aiConfig,
+            systemPrompt,
+            messages,
+          });
+
+          replyText = gen.text;
+
+          void logAiUsage(db, {
+            accountId: run.account_id,
+            conversationId: run.conversation_id!,
+            mode: "auto_reply",
+            provider: aiConfig.provider,
+            model: aiConfig.model,
+            usage: gen.usage,
+          });
+        }
+      } catch (aiErr) {
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "ai_agent_generation_failed",
+          detail: aiErr instanceof Error ? aiErr.message : String(aiErr),
+        });
+      }
+
+      if (replyText) {
+        try {
+          const { whatsapp_message_id } = await engineSendText({
+            accountId: run.account_id,
+            userId: run.user_id,
+            conversationId: run.conversation_id!,
+            contactId: run.contact_id!,
+            text: replyText,
+          });
+          await logEvent(db, run.id, "message_sent", node.node_key, {
+            node_type: "ai_agent",
+            whatsapp_message_id,
+          });
+        } catch (sendErr) {
+          await logEvent(db, run.id, "error", node.node_key, {
+            reason: "ai_agent_send_failed",
+            detail: sendErr instanceof Error ? sendErr.message : String(sendErr),
+          });
+          await endRun(db, run.id, "failed", "ai_agent_send_failed");
+          return { outcome: "completed" };
+        }
+      }
+
+      if (cfg.output_var_key && replyText) {
+        run.vars = { ...run.vars, [cfg.output_var_key]: replyText };
+        await db
+          .from("flow_runs")
+          .update({ vars: run.vars })
+          .eq("id", run.id);
+      }
+
       currentKey = cfg.next_node_key;
       continue;
     }

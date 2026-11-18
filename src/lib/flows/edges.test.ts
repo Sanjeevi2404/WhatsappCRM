@@ -331,6 +331,9 @@ describe("outgoingSlots", () => {
     expect(each({ node_key: "x", node_type: "set_tag", config: {} })).toEqual([
       "next",
     ]);
+    expect(each({ node_key: "x", node_type: "ai_agent", config: {} })).toEqual([
+      "next",
+    ]);
   });
 
   it("returns true/false slots for condition", () => {

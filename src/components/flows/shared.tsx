@@ -17,6 +17,7 @@
  */
 
 import {
+  Bot,
   CalendarCheck,
   Flag,
   GitFork,
@@ -49,6 +50,7 @@ export type NodeType =
   | 'send_media'
   | 'collect_input'
   | 'appointment_form'
+  | 'ai_agent'
   | 'condition'
   | 'set_tag'
   | 'handoff'
@@ -141,6 +143,12 @@ export const NODE_META: Record<
     color: 'text-purple-400',
     category: 'messaging',
   },
+  ai_agent: {
+    slugSeed: 'AI Agent',
+    icon: Bot,
+    color: 'text-cyan-400',
+    category: 'messaging',
+  },
   condition: {
     slugSeed: 'If / else',
     icon: GitFork,
@@ -202,6 +210,7 @@ const NODE_HUE: Record<NodeType, { l: number; c: number; h: number }> = {
   send_media: { l: 0.65, c: 0.12, h: 210 }, // sky
   collect_input: { l: 0.65, c: 0.1, h: 185 }, // teal — capture
   appointment_form: { l: 0.63, c: 0.17, h: 305 }, // purple — booking form
+  ai_agent: { l: 0.65, c: 0.16, h: 220 }, // cyan / blue — AI assistant
   condition: { l: 0.72, c: 0.15, h: 65 }, // amber — a fork in the road
   set_tag: { l: 0.65, c: 0.15, h: 350 }, // pink
   handoff: { l: 0.65, c: 0.17, h: 16 }, // rose — hands off
@@ -385,6 +394,17 @@ export function summarizeNode(
           : 'Appointment Booking Form';
       const fields = Array.isArray(cfg.fields) ? cfg.fields : [];
       return `${title} · ${fields.length} field${fields.length === 1 ? '' : 's'}`;
+    }
+    case 'ai_agent': {
+      const prompt = typeof cfg.prompt === 'string' ? cfg.prompt : '';
+      const varKey = typeof cfg.output_var_key === 'string' ? cfg.output_var_key : '';
+      const kb = cfg.use_knowledge_base !== false ? 'KB Active' : 'No KB';
+      if (prompt.length > 0) {
+        return varKey
+          ? `${truncate(prompt, 35)} (${kb}) → vars.${varKey}`
+          : `${truncate(prompt, 45)} (${kb})`;
+      }
+      return varKey ? `AI Assistant (${kb}) → vars.${varKey}` : `AI Assistant (${kb})`;
     }
     case 'condition': {
       const subjectKey =

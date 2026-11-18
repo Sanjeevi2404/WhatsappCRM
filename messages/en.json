@@ -1525,6 +1525,10 @@
           "label": "Appointment Booking Form",
           "blurb": "Sends an interactive appointment booking form"
         },
+        "ai_agent": {
+          "label": "AI Agent / Assistant",
+          "blurb": "Generates intelligent reply from Knowledge Base"
+        },
         "collect_input": {
           "label": "Collect input",
           "blurb": "Asks a question, saves the reply"

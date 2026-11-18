@@ -1521,6 +1521,14 @@
           "label": "Enviar mídia",
           "blurb": "Envia uma imagem, vídeo ou documento"
         },
+        "appointment_form": {
+          "label": "Formulário de Agendamento",
+          "blurb": "Envia formulário interativo de agendamento"
+        },
+        "ai_agent": {
+          "label": "Agente de IA",
+          "blurb": "Gera respostas inteligentes usando a base de conhecimento"
+        },
         "collect_input": {
           "label": "Coletar resposta",
           "blurb": "Faz uma pergunta e salva a resposta"

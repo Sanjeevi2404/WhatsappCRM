@@ -87,6 +87,8 @@ describe("defaultConfigFor", () => {
     "send_buttons",
     "send_list",
     "send_media",
+    "appointment_form",
+    "ai_agent",
     "collect_input",
     "condition",
     "set_tag",
@@ -126,6 +128,17 @@ describe("defaultConfigFor", () => {
     // Mirrors the regex in validate.ts: alphanumeric + underscore,
     // starts with letter or underscore.
     expect(cfg.var_key).toMatch(/^[a-zA-Z_][a-zA-Z0-9_]*$/);
+  });
+
+  it("ai_agent defaults use_knowledge_base to true", () => {
+    const cfg = defaultConfigFor("ai_agent") as {
+      prompt?: string;
+      use_knowledge_base?: boolean;
+      output_var_key?: string;
+      next_node_key?: string;
+    };
+    expect(cfg.use_knowledge_base).toBe(true);
+    expect(cfg.next_node_key).toBe("");
   });
 
   it("end's default is an empty object (terminal — no config)", () => {

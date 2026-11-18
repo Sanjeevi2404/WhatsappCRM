@@ -35,6 +35,7 @@ import {
   Plus,
   Smartphone,
   Sparkles,
+  Bot,
   Trash2,
   Upload,
   X,
@@ -58,6 +59,7 @@ import { slugify, type BuilderNode } from "../shared";
 import { NextNodeRow, NodeKeySelect, TextRow } from "./fields";
 import type {
   AppointmentFormNodeConfig,
+  AiAgentNodeConfig,
   FormFieldDefinition,
   FormFieldType,
 } from "@/lib/flows/types";
@@ -190,6 +192,16 @@ export function NodeConfigForm({
       return (
         <AppointmentFormConfigView
           cfg={cfg as Partial<AppointmentFormNodeConfig>}
+          allNodes={allNodes}
+          currentKey={node.node_key}
+          onUpdateConfig={onUpdateConfig}
+        />
+      );
+
+    case "ai_agent":
+      return (
+        <AiAgentConfigView
+          cfg={cfg as Partial<AiAgentNodeConfig>}
           allNodes={allNodes}
           currentKey={node.node_key}
           onUpdateConfig={onUpdateConfig}
@@ -1481,4 +1493,105 @@ function AppointmentFormConfigView({
     </div>
   );
 }
+
+function AiAgentConfigView({
+  cfg,
+  allNodes,
+  currentKey,
+  onUpdateConfig,
+}: {
+  cfg: Partial<AiAgentNodeConfig>;
+  allNodes: BuilderNode[];
+  currentKey: string;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-4">
+      {/* Information Header Banner */}
+      <div className="flex items-start gap-3 rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-3 text-xs">
+        <Bot className="mt-0.5 h-4 w-4 shrink-0 text-cyan-400" />
+        <div className="space-y-1">
+          <p className="font-medium text-foreground">AI Knowledge Assistant</p>
+          <p className="text-muted-foreground text-[11px] leading-relaxed">
+            Generates intelligent WhatsApp replies grounded in your company&apos;s Knowledge Base articles.
+            Strictly declines off-topic questions without pausing or handing over.
+          </p>
+        </div>
+      </div>
+
+      {/* Prompt / Custom Instructions */}
+      <div>
+        <label className="mb-1 block text-xs font-medium text-foreground">
+          Custom Prompt / Instructions (Optional)
+        </label>
+        <textarea
+          value={cfg.prompt ?? ""}
+          onChange={(e) => onUpdateConfig({ prompt: e.target.value })}
+          placeholder="e.g. Answer questions about SAI RO water purifier models, installation, pricing, and warranty. Keep responses friendly, helpful, and concise (under 300 characters)."
+          rows={3}
+          className="w-full rounded-md border border-border bg-muted p-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+        />
+        <p className="mt-1 text-[10px] text-muted-foreground">
+          Leave blank to use your account&apos;s default AI System Prompt. You can interpolate variables like{" "}
+          <code className="rounded bg-muted px-1 font-mono">{"{{vars.requirement}}"}</code>.
+        </p>
+      </div>
+
+      {/* Knowledge Base Toggle */}
+      <div className="rounded-lg border border-border bg-card p-3 space-y-2">
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-medium text-foreground cursor-pointer flex items-center gap-2">
+            <Sparkles className="h-3.5 w-3.5 text-cyan-400" />
+            Ground with Company Knowledge Base
+          </label>
+          <input
+            type="checkbox"
+            checked={cfg.use_knowledge_base !== false}
+            onChange={(e) => onUpdateConfig({ use_knowledge_base: e.target.checked })}
+            className="h-4 w-4 rounded border-border accent-primary cursor-pointer"
+          />
+        </div>
+        <p className="text-[10px] text-muted-foreground">
+          Retrieves and injects relevant articles from your uploaded Knowledge Base to answer customer questions accurately.
+        </p>
+      </div>
+
+      {/* Output Variable */}
+      <div>
+        <label className="mb-1 block text-xs font-medium text-foreground">
+          Store Reply in Variable (Optional)
+        </label>
+        <Input
+          value={cfg.output_var_key ?? ""}
+          onChange={(e) =>
+            onUpdateConfig({
+              output_var_key: e.target.value.replace(/[^a-zA-Z0-9_]/g, ""),
+            })
+          }
+          placeholder="e.g. ai_reply"
+          className="bg-muted font-mono text-xs"
+        />
+        <p className="mt-1 text-[10px] text-muted-foreground">
+          Stores the generated text into{" "}
+          <code className="rounded bg-muted px-1 font-mono">
+            {"{{vars."}
+            {cfg.output_var_key || "ai_reply"}
+            {"}}"}
+          </code>{" "}
+          for downstream condition checks or handoff notes.
+        </p>
+      </div>
+
+      {/* Next Node Target */}
+      <NextNodeRow
+        value={cfg.next_node_key ?? ""}
+        allNodes={allNodes}
+        currentKey={currentKey}
+        onChange={(v) => onUpdateConfig({ next_node_key: v })}
+        label="Advance After AI Reply"
+      />
+    </div>
+  );
+}
+
 

@@ -1521,6 +1521,14 @@
           "label": "미디어 보내기",
           "blurb": "이미지, 동영상, 문서를 보냅니다"
         },
+        "appointment_form": {
+          "label": "예약 양식",
+          "blurb": "대화형 예약 양식을 보냅니다"
+        },
+        "ai_agent": {
+          "label": "AI 에이전트",
+          "blurb": "지식 기반을 바탕으로 지능형 답변을 생성합니다"
+        },
         "collect_input": {
           "label": "입력 수집",
           "blurb": "질문을 하고 응답을 저장합니다"

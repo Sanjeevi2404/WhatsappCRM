@@ -791,3 +791,47 @@ describe("auto-advancing cycles", () => {
     expect(findAutoAdvancingCycles(validNodes)).toEqual([]);
   });
 });
+
+describe("validateFlowForActivation — ai_agent", () => {
+  it("passes validation when ai_agent has valid next_node_key and contributes to reachability", () => {
+    const nodes = [
+      { node_key: "start", node_type: "start", config: { next_node_key: "ai" } },
+      {
+        node_key: "ai",
+        node_type: "ai_agent",
+        config: {
+          prompt: "Answer water purifier questions",
+          use_knowledge_base: true,
+          output_var_key: "ai_reply",
+          next_node_key: "end",
+        },
+      },
+      { node_key: "end", node_type: "end", config: {} },
+    ];
+    const issues = validateFlowForActivation(validFlow, nodes);
+    expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
+    const set = reachableFromEntry("start", nodes);
+    expect(set).toEqual(new Set(["start", "ai", "end"]));
+  });
+
+  it("flags error when ai_agent is missing next_node_key", () => {
+    const nodes = [
+      { node_key: "start", node_type: "start", config: { next_node_key: "ai" } },
+      {
+        node_key: "ai",
+        node_type: "ai_agent",
+        config: {
+          prompt: "Answer water purifier questions",
+          next_node_key: "",
+        },
+      },
+      { node_key: "end", node_type: "end", config: {} },
+    ];
+    const issues = validateFlowForActivation(validFlow, nodes);
+    expect(
+      issues.some(
+        (i) => i.node_key === "ai" && i.field === "next_node_key" && i.severity === "error",
+      ),
+    ).toBe(true);
+  });
+});

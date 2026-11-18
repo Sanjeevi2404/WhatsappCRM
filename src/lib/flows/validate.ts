@@ -834,6 +834,28 @@ function validateNode(
       break;
     }
 
+    case "ai_agent": {
+      const cfg = node.config as { next_node_key?: string };
+      if (!cfg.next_node_key) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "next_node_key",
+          message: "AI Agent node must specify a next node.",
+        });
+      } else if (!knownKeys.has(cfg.next_node_key)) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "next_node_key",
+          message: `Referenced next node "${cfg.next_node_key}" does not exist.`,
+        });
+      }
+      break;
+    }
+
     case "end":
       // Terminal node has no outgoing edges; nothing to validate beyond existence.
       break;
@@ -883,6 +905,7 @@ function outgoingEdges(node: NodeInput): string[] {
     case "send_media":
     case "collect_input":
     case "appointment_form":
+    case "ai_agent":
     case "set_tag":
     case "handoff": {
       const cfg = node.config as { next_node_key?: string };

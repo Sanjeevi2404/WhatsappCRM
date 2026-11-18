@@ -587,6 +587,7 @@ function AddNodeButton({ onAdd, t }: { onAdd: (type: NodeType) => void; t: Retur
     'send_message',
     'send_media',
     'appointment_form',
+    'ai_agent',
     'collect_input',
     'condition',
     'set_tag',
