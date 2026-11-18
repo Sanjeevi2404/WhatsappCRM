@@ -1,6 +1,6 @@
 import { supabaseAdmin } from './admin-client'
 import { loadAiConfig } from './config'
-import { buildConversationContext } from './context'
+import { buildConversationContext, loadCustomerDetails } from './context'
 import { retrieveKnowledge } from './knowledge'
 import { generateReply } from './generate'
 import { buildSystemPrompt } from './defaults'
@@ -122,18 +122,22 @@ export async function dispatchInboundToAiReply(
       await showTypingIndicator(db, accountId, inboundMessageId)
     }
 
-    // Ground the reply in the account's knowledge base (best-effort).
-    const knowledge = await retrieveKnowledge(
-      db,
-      accountId,
-      config,
-      latestUserMessage(messages),
-    )
+    // Ground the reply in the account's knowledge base and customer details (best-effort).
+    const [knowledge, customerDetails] = await Promise.all([
+      retrieveKnowledge(
+        db,
+        accountId,
+        config,
+        latestUserMessage(messages),
+      ),
+      loadCustomerDetails(db, accountId, contactId),
+    ])
 
     const systemPrompt = buildSystemPrompt({
       userPrompt: config.systemPrompt,
       mode: 'auto_reply',
       knowledge,
+      customerDetails,
     })
 
     const { text, handoff, usage } = await generateReply({

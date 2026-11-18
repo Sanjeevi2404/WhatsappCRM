@@ -273,11 +273,16 @@ describe("matchesKeywordTrigger", () => {
     expect(matchesKeywordTrigger("anything", { keywords: [] })).toBe(false);
   });
 
-  it("default match_type='contains' does case-insensitive substring", () => {
-    const cfg = { keywords: ["support"] };
+  it("default match_type='contains' does case-insensitive word-boundary match", () => {
+    const cfg = { keywords: ["support", "ro", "hi"] };
     expect(matchesKeywordTrigger("I need SUPPORT please", cfg)).toBe(true);
     expect(matchesKeywordTrigger("Support is great", cfg)).toBe(true);
+    expect(matchesKeywordTrigger("sai ro system", cfg)).toBe(true);
+    expect(matchesKeywordTrigger("hi there!", cfg)).toBe(true);
     expect(matchesKeywordTrigger("Help me", cfg)).toBe(false);
+    // Does NOT match sub-words
+    expect(matchesKeywordTrigger("This is wrong", cfg)).toBe(false);
+    expect(matchesKeywordTrigger("Can u pls tell my details so I will conform where there correct or wrong", cfg)).toBe(false);
   });
 
   it("match_type='exact' compares the whole string case-insensitively", () => {

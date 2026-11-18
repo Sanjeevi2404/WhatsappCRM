@@ -65,7 +65,7 @@ import {
   AUTO_ADVANCING_NODE_TYPES,
 } from "./types";
 import { loadAiConfig } from "@/lib/ai/config";
-import { buildConversationContext } from "@/lib/ai/context";
+import { buildConversationContext, loadCustomerDetails } from "@/lib/ai/context";
 import { retrieveKnowledge } from "@/lib/ai/knowledge";
 import { generateReply } from "@/lib/ai/generate";
 import { buildSystemPrompt } from "@/lib/ai/defaults";
@@ -239,8 +239,13 @@ export function matchesKeywordTrigger(
   for (const raw of cfg.keywords) {
     if (!raw) continue;
     const needle = cfg.case_sensitive ? raw : raw.toLowerCase();
-    if (matchType === "exact" ? haystack === needle : haystack.includes(needle)) {
-      return true;
+    if (matchType === "exact") {
+      if (haystack === needle) return true;
+    } else {
+      // Word boundary match so short keywords like "ro" or "hi" don't match inside "wrong" or "this"
+      const escaped = needle.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&");
+      const rx = new RegExp(`(^|[^a-zA-Z0-9_])${escaped}($|[^a-zA-Z0-9_])`, cfg.case_sensitive ? "" : "i");
+      if (rx.test(haystack)) return true;
     }
   }
   return false;
@@ -908,15 +913,17 @@ async function advanceFromNodeKey(
             ? await buildConversationContext(db, run.conversation_id)
             : [];
 
-          let knowledge: string[] = [];
-          if (cfg.use_knowledge_base !== false) {
-            knowledge = await retrieveKnowledge(
-              db,
-              run.account_id,
-              aiConfig,
-              latestUserMessage(messages) || "Customer inquiry",
-            );
-          }
+          const [knowledge, customerDetails] = await Promise.all([
+            cfg.use_knowledge_base !== false
+              ? retrieveKnowledge(
+                  db,
+                  run.account_id,
+                  aiConfig,
+                  latestUserMessage(messages) || "Customer inquiry",
+                )
+              : Promise.resolve([]),
+            loadCustomerDetails(db, run.account_id, run.contact_id),
+          ]);
 
           const customPrompt = cfg.prompt
             ? interpolateVars(cfg.prompt, run.vars)
@@ -926,6 +933,7 @@ async function advanceFromNodeKey(
             userPrompt: customPrompt,
             mode: "auto_reply",
             knowledge,
+            customerDetails,
           });
 
           const gen = await generateReply({

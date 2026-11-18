@@ -25,7 +25,7 @@ export async function buildConversationContext(
     .from('messages')
     .select('sender_type, content_text')
     .eq('conversation_id', conversationId)
-    .eq('content_type', 'text')
+    .not('content_text', 'is', null)
     .order('created_at', { ascending: false })
     .limit(limit)
 
@@ -39,3 +39,58 @@ export async function buildConversationContext(
       content: m.content_text!.trim(),
     }))
 }
+
+/**
+ * Fetch known contact information and recent appointment/booking details
+ * for the customer so the AI can answer questions about their details and avoid
+ * repeatedly asking for info the customer has already submitted.
+ */
+export async function loadCustomerDetails(
+  db: SupabaseClient,
+  accountId: string,
+  contactId?: string | null,
+): Promise<string | undefined> {
+  if (!contactId) return undefined
+
+  try {
+    const parts: string[] = []
+
+    const { data: contact } = await db
+      .from('contacts')
+      .select('name, phone, email')
+      .eq('id', contactId)
+      .maybeSingle()
+
+    if (contact) {
+      if (contact.name) parts.push(`Name: ${contact.name}`)
+      if (contact.phone) parts.push(`Phone: ${contact.phone}`)
+      if (contact.email) parts.push(`Email: ${contact.email}`)
+    }
+
+    const { data: appt } = await db
+      .from('appointments')
+      .select('customer_name, location, phone, appointment_date, appointment_time, appointment_type, additional_requirements, status')
+      .eq('account_id', accountId)
+      .eq('contact_id', contactId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (appt) {
+      parts.push(`Recent Appointment Booking (${appt.status}):`)
+      if (appt.customer_name && (!contact?.name || contact.name !== appt.customer_name)) {
+        parts.push(`  Customer Name: ${appt.customer_name}`)
+      }
+      if (appt.appointment_type) parts.push(`  Service/Type: ${appt.appointment_type}`)
+      if (appt.appointment_date) parts.push(`  Date: ${appt.appointment_date} at ${appt.appointment_time}`)
+      if (appt.location) parts.push(`  Area/Location: ${appt.location}`)
+      if (appt.additional_requirements) parts.push(`  Requirement/Details: ${appt.additional_requirements}`)
+    }
+
+    return parts.length > 0 ? parts.join('\n') : undefined
+  } catch (err) {
+    console.warn('[ai context] loadCustomerDetails failed (continuing):', err)
+    return undefined
+  }
+}
+
