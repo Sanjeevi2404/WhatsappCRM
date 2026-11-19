@@ -146,13 +146,16 @@ export async function POST(
   // 3. Upsert / update the user profile to belong to inviter's account with the invited role
   const { error: profileUpdateError } = await adminClient
     .from("profiles")
-    .upsert({
-      user_id: userId,
-      account_id: inv.account_id,
-      account_role: inv.role,
-      full_name: fullName || email.split("@")[0],
-      email,
-    });
+    .upsert(
+      {
+        user_id: userId,
+        account_id: inv.account_id,
+        account_role: inv.role,
+        full_name: fullName || email.split("@")[0],
+        email,
+      },
+      { onConflict: "user_id" },
+    );
 
   if (profileUpdateError) {
     console.error("[invite-signup] profile update error:", profileUpdateError);
@@ -167,9 +170,17 @@ export async function POST(
     })
     .eq("id", inv.id);
 
-  // 5. Delete orphan initial account if one was created by trigger
-  if (orphanAccountId && orphanAccountId !== inv.account_id) {
-    await adminClient.from("accounts").delete().eq("id", orphanAccountId);
+  // 5. Delete orphan initial account ONLY if user's profile was successfully moved to target account
+  if (orphanAccountId && orphanAccountId !== inv.account_id && !profileUpdateError) {
+    const { data: currentProfile } = await adminClient
+      .from("profiles")
+      .select("account_id")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (currentProfile?.account_id === inv.account_id) {
+      await adminClient.from("accounts").delete().eq("id", orphanAccountId);
+    }
   }
 
   return NextResponse.json({ ok: true, userId });
