@@ -2,7 +2,7 @@
 
 import { Suspense, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,7 @@ export default function SignupPage() {
 }
 
 function SignupPageInner() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   // When the user lands here from `/join/<token>` we carry the
   // invite token in the query so it survives the signup → email
@@ -62,6 +63,48 @@ function SignupPageInner() {
 
     setLoading(true);
 
+    // If an invitation token is provided, create and confirm the account
+    // directly through our backend API route. This avoids Supabase free tier's
+    // strict SMTP hourly rate limit ("email rate limit exceeded") and instantly
+    // joins the invited team.
+    if (inviteToken) {
+      try {
+        const res = await fetch(
+          `/api/invitations/${encodeURIComponent(inviteToken)}/signup`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, password, fullName }),
+          },
+        );
+        const data = await res.json();
+        if (!res.ok) {
+          setError(data.error || "Failed to create account with invitation");
+          setLoading(false);
+          return;
+        }
+
+        // Auto sign-in
+        const { error: signInErr } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (signInErr) {
+          router.push(`/login?email=${encodeURIComponent(email)}`);
+          return;
+        }
+
+        router.push("/dashboard");
+        router.refresh();
+        return;
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "An unexpected error occurred";
+        setError(message);
+        setLoading(false);
+        return;
+      }
+    }
+
     // Always name our own origin as the place the confirmation link
     // returns to. Previously this was left unset unless an invite was
     // involved, so Supabase fell back to its Site URL — which on a
@@ -72,10 +115,7 @@ function SignupPageInner() {
     // for a session and forwards to `next` (issue #592). Supabase still
     // has to allow this origin under Authentication → URL Configuration
     // → Redirect URLs; see docs/auth-emails.md.
-    const next = inviteToken
-      ? `/join/${encodeURIComponent(inviteToken)}`
-      : "/dashboard";
-    const emailRedirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
+    const emailRedirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent("/dashboard")}`;
 
     const { error } = await supabase.auth.signUp({
       email,
