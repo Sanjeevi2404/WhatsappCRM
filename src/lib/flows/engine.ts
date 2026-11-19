@@ -1632,6 +1632,59 @@ async function handleReplyForActiveRun(
         .eq("id", run.contact_id);
     }
 
+    // Automatically populate Contact Custom Fields from flow submission
+    if (run.contact_id && run.account_id) {
+      try {
+        const { data: customFields } = await db
+          .from("custom_fields")
+          .select("id, field_name")
+          .eq("account_id", run.account_id);
+
+        if (customFields && customFields.length > 0) {
+          const fieldMap = new Map(
+            customFields.map((f: { id: string; field_name: string }) => [
+              f.field_name.toLowerCase().trim(),
+              f.id,
+            ]),
+          );
+
+          let derivedLocation = location;
+          if (!derivedLocation && requirements) {
+            const reqLines = requirements.split("\n").map((l: string) => l.trim()).filter(Boolean);
+            if (reqLines.length >= 2) {
+              derivedLocation = reqLines[1];
+            }
+          }
+
+          const candidates: Record<string, string | null | undefined> = {
+            "customer name": custName && custName !== "Customer" && custName !== "New Lead" ? custName : null,
+            "customer type": customerType,
+            "location": derivedLocation,
+            "preferred callback time": [apptDate, apptTime].filter(Boolean).join(" ") || null,
+            "service need": reqCategory || apptType,
+            "specific requirement": requirements,
+            "water source": waterSource,
+          };
+
+          for (const [fieldName, val] of Object.entries(candidates)) {
+            const fieldId = fieldMap.get(fieldName);
+            if (fieldId && val && typeof val === "string" && val.trim()) {
+              await db.from("contact_custom_values").upsert(
+                {
+                  contact_id: run.contact_id,
+                  custom_field_id: fieldId,
+                  value: val.trim(),
+                },
+                { onConflict: "contact_id,custom_field_id" },
+              );
+            }
+          }
+        }
+      } catch (cfErr) {
+        console.warn("[engine] saving contact custom fields failed:", cfErr);
+      }
+    }
+
     if (cfg.next_node_key) {
       const customerDetailsSummary = [
         custName && custName !== "Customer" ? `👤 Customer Name: ${custName}` : null,

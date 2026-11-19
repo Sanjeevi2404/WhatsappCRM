@@ -13,6 +13,7 @@ import {
 } from '@/lib/flows/meta-send'
 import { sendTypingIndicator } from '@/lib/whatsapp/meta-api'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import type { ChatMessage, AiConfig } from './types'
 
 interface DispatchArgs {
   /** Tenancy key — drives config, contact, and whatsapp_config lookups. */
@@ -245,8 +246,79 @@ export async function dispatchInboundToAiReply(
       text,
       aiGenerated: true,
     })
+
+    // Extract customer details from conversation into contact custom fields asynchronously
+    void extractAndSaveCustomFields(db, accountId, contactId, messages, config)
   } catch (err) {
     console.error('[ai auto-reply] dispatch failed:', err)
+  }
+}
+
+async function extractAndSaveCustomFields(
+  db: ReturnType<typeof supabaseAdmin>,
+  accountId: string,
+  contactId: string,
+  messages: ChatMessage[],
+  config: AiConfig,
+): Promise<void> {
+  try {
+    const { data: fields } = await db
+      .from('custom_fields')
+      .select('id, field_name')
+      .eq('account_id', accountId)
+
+    if (!fields || fields.length === 0) return
+
+    const userTurns = messages.filter((m) => m.role === 'user')
+    if (userTurns.length === 0) return
+
+    const fieldNames = fields.map((f: { id: string; field_name: string }) => f.field_name).join(', ')
+
+    const extractionPrompt = `Analyze the customer messages in this WhatsApp conversation and extract any specific details for these contact custom fields: [${fieldNames}].
+Only extract details explicitly stated by the customer. Do not guess or invent data.
+Return ONLY a valid JSON object mapping the field names to their string values. If no field details were mentioned, return {}.`
+
+    const extractionMessages: ChatMessage[] = [
+      ...messages.slice(-6),
+      { role: 'user', content: extractionPrompt },
+    ]
+
+    const res = await generateReply({
+      config,
+      systemPrompt: 'You are an accurate JSON entity extraction system. Respond strictly with a JSON object, nothing else.',
+      messages: extractionMessages,
+    })
+
+    if (!res.text) return
+    const jsonMatch = res.text.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) return
+
+    const extracted = JSON.parse(jsonMatch[0]) as Record<string, unknown>
+    if (!extracted || typeof extracted !== 'object') return
+
+    const fieldMap = new Map(
+      fields.map((f: { id: string; field_name: string }) => [
+        f.field_name.toLowerCase().trim(),
+        f.id,
+      ]),
+    )
+
+    for (const [key, rawVal] of Object.entries(extracted)) {
+      if (!rawVal || typeof rawVal !== 'string') continue
+      const fieldId = fieldMap.get(key.toLowerCase().trim())
+      if (fieldId && rawVal.trim()) {
+        await db.from('contact_custom_values').upsert(
+          {
+            contact_id: contactId,
+            custom_field_id: fieldId,
+            value: rawVal.trim(),
+          },
+          { onConflict: 'contact_id,custom_field_id' },
+        )
+      }
+    }
+  } catch (err) {
+    console.warn('[ai entity-extraction] failed (continuing):', err)
   }
 }
 
