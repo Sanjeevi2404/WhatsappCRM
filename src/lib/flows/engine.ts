@@ -1540,7 +1540,7 @@ async function handleReplyForActiveRun(
       notesParts.push(`Preferred Date & Time: ${[apptDate, apptTime].filter(Boolean).join(" ")}`);
     }
     if (requirements) {
-      notesParts.push(`Customer Details / Notes:\n${requirements}`);
+      notesParts.push(`Contact Person Details:\n${requirements}`);
     }
     const dealNotes = notesParts.join("\n");
 

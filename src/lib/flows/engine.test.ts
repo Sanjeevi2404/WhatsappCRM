@@ -801,6 +801,7 @@ describe("appointment_form node execution and submission", () => {
       notes: expect.stringContaining("Ramesh Kumar"),
       status: "open",
     });
+    expect(h.state.deals[0].notes).toContain("Contact Person Details:");
     expect(h.state.deals[0].notes).toContain("Commercial RO plant 2000 LPH");
 
     // 3. Contact updated with customer name
