@@ -40,7 +40,7 @@ function rpcErrorToResponse(err: PostgrestError): NextResponse {
   }
   console.error("[members route] unexpected RPC error:", err);
   return NextResponse.json(
-    { error: t('account.members.updateFailed') },
+    { error: err.message || t('account.members.updateFailed') },
     { status: 500 },
   );
 }
