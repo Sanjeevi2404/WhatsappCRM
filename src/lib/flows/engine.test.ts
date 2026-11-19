@@ -794,12 +794,14 @@ describe("appointment_form node execution and submission", () => {
       status: "pending",
     });
 
-    // 2. Created a lead/deal in deals table
+    // 2. Created a lead/deal in deals table with notes populated
     expect(h.state.deals).toHaveLength(1);
     expect(h.state.deals[0]).toMatchObject({
       title: expect.stringContaining("Ramesh Kumar"),
+      notes: expect.stringContaining("Ramesh Kumar"),
       status: "open",
     });
+    expect(h.state.deals[0].notes).toContain("Commercial RO plant 2000 LPH");
 
     // 3. Contact updated with customer name
     expect(h.state.updates).toContainEqual(

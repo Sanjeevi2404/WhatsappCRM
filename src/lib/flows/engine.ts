@@ -852,7 +852,7 @@ async function advanceFromNodeKey(
       try {
         const { whatsapp_message_id } = await engineSendText({
           accountId: run.account_id,
-    userId: run.user_id,
+          userId: run.user_id,
           conversationId: run.conversation_id!,
           contactId: run.contact_id!,
           text: interpolateVars(cfg.text, run.vars),
@@ -877,7 +877,7 @@ async function advanceFromNodeKey(
       try {
         const { whatsapp_message_id } = await engineSendMedia({
           accountId: run.account_id,
-    userId: run.user_id,
+          userId: run.user_id,
           conversationId: run.conversation_id!,
           contactId: run.contact_id!,
           kind: cfg.media_type,
@@ -916,11 +916,11 @@ async function advanceFromNodeKey(
           const [knowledge, customerDetails] = await Promise.all([
             cfg.use_knowledge_base !== false
               ? retrieveKnowledge(
-                  db,
-                  run.account_id,
-                  aiConfig,
-                  latestUserMessage(messages) || "Customer inquiry",
-                )
+                db,
+                run.account_id,
+                aiConfig,
+                latestUserMessage(messages) || "Customer inquiry",
+              )
               : Promise.resolve([]),
             loadCustomerDetails(db, run.account_id, run.contact_id),
           ]);
@@ -1001,7 +1001,7 @@ async function advanceFromNodeKey(
       try {
         const { whatsapp_message_id } = await engineSendText({
           accountId: run.account_id,
-    userId: run.user_id,
+          userId: run.user_id,
           conversationId: run.conversation_id!,
           contactId: run.contact_id!,
           text: interpolateVars(cfg.prompt_text, run.vars),
@@ -1446,11 +1446,11 @@ async function handleReplyForActiveRun(
         ? (message.data as Record<string, unknown>)
         : message.kind === "text"
           ? {
-              additional_requirements: message.text,
-              specific_requirement: message.text,
-              notes: message.text,
-              customer_details: message.text,
-            }
+            additional_requirements: message.text,
+            specific_requirement: message.text,
+            notes: message.text,
+            customer_details: message.text,
+          }
           : {};
 
     const { data: contact } = await db
@@ -1461,60 +1461,64 @@ async function handleReplyForActiveRun(
 
     const custName = String(
       rawData.customer_name ||
-        rawData.name ||
-        rawData.Name ||
-        rawData["Customer Name"] ||
-        contact?.name ||
-        "Customer",
+      rawData.name ||
+      rawData.Name ||
+      rawData["Customer Name"] ||
+      contact?.name ||
+      "Customer",
     );
     const phone = String(
       rawData.phone ||
-        rawData.contact_number ||
-        rawData["Contact Number"] ||
-        contact?.phone ||
-        "",
+      rawData.contact_number ||
+      rawData["Contact Number"] ||
+      contact?.phone ||
+      "",
     );
     const email = rawData.email ? String(rawData.email) : (contact?.email || null);
     const apptDate = String(
       rawData.appointment_date ||
-        rawData.date ||
-        new Date().toISOString().split("T")[0],
+      rawData.date ||
+      new Date().toISOString().split("T")[0],
     );
     const apptTime = String(rawData.appointment_time || rawData.time || "10:00 AM");
     const location =
       rawData.location ||
-      rawData.area ||
-      rawData.area_location ||
-      rawData["Area / Location"] ||
-      rawData["Area/Location"] ||
-      rawData.address
+        rawData.area ||
+        rawData.area_location ||
+        rawData["Area / Location"] ||
+        rawData["Area/Location"] ||
+        rawData.address
         ? String(
-            rawData.location ||
-              rawData.area ||
-              rawData.area_location ||
-              rawData["Area / Location"] ||
-              rawData["Area/Location"] ||
-              rawData.address,
-          )
+          rawData.location ||
+          rawData.area ||
+          rawData.area_location ||
+          rawData["Area / Location"] ||
+          rawData["Area/Location"] ||
+          rawData.address,
+        )
         : null;
     const requirements =
       rawData.additional_requirements ||
-      rawData.specific_requirement ||
-      rawData["Specific Requirement"] ||
-      rawData.notes ||
-      rawData.requirements
+        rawData.specific_requirement ||
+        rawData["Specific Requirement"] ||
+        rawData.customer_details ||
+        rawData["Customer Details"] ||
+        rawData.notes ||
+        rawData.requirements
         ? String(
-            rawData.additional_requirements ||
-              rawData.specific_requirement ||
-              rawData["Specific Requirement"] ||
-              rawData.notes ||
-              rawData.requirements,
-          )
+          rawData.additional_requirements ||
+          rawData.specific_requirement ||
+          rawData["Specific Requirement"] ||
+          rawData.customer_details ||
+          rawData["Customer Details"] ||
+          rawData.notes ||
+          rawData.requirements,
+        )
         : null;
 
     const customerType = String(
       run.vars.customer_type ||
-        (run.vars.water_source ? "Home" : run.vars.business_type ? "Commercial" : "Home"),
+      (run.vars.water_source ? "Home" : run.vars.business_type ? "Commercial" : "Home"),
     );
     const waterSource = run.vars.water_source ? String(run.vars.water_source) : null;
     const businessType = run.vars.business_type ? String(run.vars.business_type) : null;
@@ -1522,6 +1526,23 @@ async function handleReplyForActiveRun(
       ? String(run.vars.requirement_category)
       : null;
     const apptType = reqCategory || String(rawData.appointment_type || rawData.service || "RO Enquiry");
+
+    const notesParts: string[] = [];
+    if (custName && custName !== "New Lead") notesParts.push(`Customer Name: ${custName}`);
+    if (phone) notesParts.push(`Contact Number: ${phone}`);
+    if (email) notesParts.push(`Email: ${email}`);
+    if (location) notesParts.push(`Location / Area: ${location}`);
+    if (customerType) notesParts.push(`Customer Type: ${customerType}`);
+    if (reqCategory || apptType) notesParts.push(`Service / Requirement: ${reqCategory || apptType}`);
+    if (waterSource) notesParts.push(`Water Source: ${waterSource}`);
+    if (businessType) notesParts.push(`Business Type: ${businessType}`);
+    if (apptDate || apptTime) {
+      notesParts.push(`Preferred Date & Time: ${[apptDate, apptTime].filter(Boolean).join(" ")}`);
+    }
+    if (requirements) {
+      notesParts.push(`Customer Details / Notes:\n${requirements}`);
+    }
+    const dealNotes = notesParts.join("\n");
 
     let dealId: string | null = null;
     if (cfg.create_lead !== false) {
@@ -1556,6 +1577,7 @@ async function handleReplyForActiveRun(
               stage_id: stageId,
               title: `${custName} - ${customerType} ${reqCategory || "RO Enquiry"}`,
               value: 0,
+              notes: dealNotes || null,
               status: "open",
             })
             .select("id")
